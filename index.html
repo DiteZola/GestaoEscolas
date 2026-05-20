@@ -697,6 +697,56 @@ async function testarConexaoFirebase() {
   }
 }
 
+// ========== DEBUG - VER ESTADO DO SISTEMA ==========
+function debugSistema() {
+  console.clear();
+  console.log('╔══════════════════════════════════════════════════════════════╗');
+  console.log('║              DEBUG - ESTADO DO SISTEMA                        ║');
+  console.log('╚══════════════════════════════════════════════════════════════╝');
+  console.log('');
+  console.log('📊 SISTEMA:');
+  console.log('   - Versão:', SYSTEM.version);
+  console.log('   - Setup concluído:', SYSTEM.config?.setupDone);
+  console.log('   - Admin:', SYSTEM.admin?.nome || 'Não definido');
+  console.log('   - Admin username:', SYSTEM.admin?.username || 'N/A');
+  console.log('');
+  console.log('🏫 ESCOLAS:', SYSTEM.schools?.length || 0);
+  
+  if (SYSTEM.schools && SYSTEM.schools.length > 0) {
+    SYSTEM.schools.forEach((escola, i) => {
+      console.log(`   ${i+1}. ${escola.info.nome}`);
+      console.log(`      - ID: ${escola.id}`);
+      console.log(`      - Utilizadores: ${escola.users?.length || 0}`);
+      
+      if (escola.users && escola.users.length > 0) {
+        escola.users.forEach(u => {
+          console.log(`        • ${u.nome} (${u.perfil}) - user: ${u.username}`);
+        });
+      }
+      
+      console.log(`      - Alunos: ${escola.students?.length || 0}`);
+    });
+  }
+  
+  console.log('');
+  console.log('🌐 CONEXÃO:');
+  console.log('   - Online:', isOnline);
+  console.log('   - Listener ativo:', !!unsubscribeListener);
+  console.log('   - Sincronizando:', isSyncing);
+  console.log('');
+  console.log('💾 FIREBASE:');
+  console.log('   - Colecção:', COLECAO);
+  console.log('   - Documento:', DOCUMENTO);
+  console.log('');
+  console.log('═══════════════════════════════════════════════════════════════');
+  
+  return SYSTEM;
+}
+
+// Disponibilizar no console global
+window.debugSistema = debugSistema;
+window.SYSTEM = SYSTEM;
+
 // ============ HELPERS ============
 function showToast(msg,type='info'){
   const t=document.getElementById('toast');
@@ -731,7 +781,7 @@ function getPhotoData(previewId){
 }
 
 // ============ SETUP ADMIN ============
-function setupAdmin(){
+async function setupAdmin(){
   const nome=document.getElementById('adminNome').value.trim();
   const bi=document.getElementById('adminBI').value.trim();
   const nasc=document.getElementById('adminNasc').value;
@@ -749,49 +799,120 @@ function setupAdmin(){
   if(senha!==senha2)return showToast('As senhas não coincidem!','error');
   if(senha.length<4)return showToast('Senha deve ter pelo menos 4 caracteres!','error');
 
+  logSync('Criando administrador do sistema: ' + nome, 'info');
+
   SYSTEM.admin={
-    id:generateId(),nome,bi,dataNascimento:nasc,genero,provincia,municipio,telefone,email,
-    username,senha:btoa(senha),perfil:'admin_sistema',foto,ativo:true,dataCriacao:new Date().toISOString()
+    id:generateId(),
+    nome,
+    bi,
+    dataNascimento:nasc,
+    genero,
+    provincia,
+    municipio,
+    telefone,
+    email,
+    username,
+    senha:btoa(senha),
+    perfil:'admin_sistema',
+    foto,
+    ativo:true,
+    dataCriacao:new Date().toISOString()
   };
   SYSTEM.config.setupDone=true;
-  saveSystem();syncToFirebase();
-  showToast('Administrador cadastrado!','success');
+  SYSTEM.schools = SYSTEM.schools || [];
+  
+  // Salvar localmente primeiro
+  saveSystem(false);
+  
+  // Sincronizar com Firebase
+  showToast('Salvando no servidor...','info');
+  
+  try {
+    await salvarNoFirebase();
+    logSync('✅ Administrador criado e sincronizado!', 'success');
+    showToast('Administrador cadastrado com sucesso!','success');
+  } catch(e) {
+    logSync('⚠️ Salvo localmente, erro no sync: ' + e.message, 'warning');
+    showToast('Cadastrado! Sync pendente.','warning');
+  }
+  
   setTimeout(()=>showScreen('loginScreen'),1500);
 }
 
 // ============ LOGIN ============
-function doLogin(){
+async function doLogin(){
   const user=document.getElementById('loginUser').value.trim();
   const pass=document.getElementById('loginPass').value;
   if(!user||!pass)return showToast('Preencha todos os campos!','error');
 
-  // Check system admin
-  if(SYSTEM.admin&&SYSTEM.admin.username===user&&atob(SYSTEM.admin.senha)===pass){
-    currentUser=SYSTEM.admin;
-    currentSchool=null;
-    showScreen('dashboardScreen');
-    buildSidebar();
-    updateHeader();
-    navigateTo('adminDashboard');
-    showToast('Bem-vindo, '+currentUser.nome+'!','success');
-    return;
-  }
-
-  // Check school users
-  for(const school of SYSTEM.schools){
-    const found=school.users.find(u=>u.username===user&&atob(u.senha)===pass&&u.ativo);
-    if(found){
-      currentUser=found;
-      currentSchool=school;
-      showScreen('dashboardScreen');
-      buildSidebar();
-      updateHeader();
-      navigateTo('dashboard');
-      showToast('Bem-vindo, '+currentUser.nome+'!','success');
-      return;
+  logSync('Tentativa de login: ' + user, 'info');
+  
+  // Se online, tentar carregar dados mais recentes do Firebase primeiro
+  if(isOnline){
+    showToast('Verificando credenciais...','info');
+    try {
+      await carregarDoFirebase();
+    } catch(e) {
+      logSync('Erro ao carregar dados: ' + e.message, 'warning');
     }
   }
 
+  // Check system admin
+  if(SYSTEM.admin && SYSTEM.admin.username === user) {
+    try {
+      if(atob(SYSTEM.admin.senha) === pass) {
+        currentUser = SYSTEM.admin;
+        currentSchool = null;
+        showScreen('dashboardScreen');
+        buildSidebar();
+        updateHeader();
+        navigateTo('adminDashboard');
+        logSync('Login admin: ' + currentUser.nome, 'success');
+        showToast('Bem-vindo, ' + currentUser.nome + '!', 'success');
+        return;
+      }
+    } catch(e) {
+      logSync('Erro ao verificar senha admin: ' + e.message, 'error');
+    }
+  }
+
+  // Check school users (directors, teachers, etc)
+  logSync('Verificando em ' + SYSTEM.schools.length + ' escola(s)...', 'info');
+  
+  for(const school of SYSTEM.schools) {
+    logSync('Escola: ' + school.info.nome + ' - ' + school.users.length + ' utilizador(es)', 'info');
+    
+    for(const u of school.users) {
+      if(u.username === user) {
+        logSync('Utilizador encontrado: ' + u.nome + ' (' + u.perfil + ')', 'info');
+        
+        try {
+          if(atob(u.senha) === pass) {
+            if(!u.ativo) {
+              showToast('Utilizador inactivo. Contacte o administrador.', 'error');
+              return;
+            }
+            
+            currentUser = u;
+            currentSchool = school;
+            showScreen('dashboardScreen');
+            buildSidebar();
+            updateHeader();
+            navigateTo('dashboard');
+            logSync('Login OK: ' + u.nome + ' @ ' + school.info.nome, 'success');
+            showToast('Bem-vindo, ' + currentUser.nome + '!', 'success');
+            return;
+          } else {
+            logSync('Senha incorreta para: ' + u.username, 'warning');
+          }
+        } catch(e) {
+          logSync('Erro ao verificar senha: ' + e.message, 'error');
+        }
+      }
+    }
+  }
+
+  logSync('Login falhou para: ' + user, 'error');
   showToast('Credenciais inválidas!','error');
 }
 
@@ -1034,7 +1155,7 @@ function modalEscola(editId){
 
 function editSchool(id){modalEscola(id);}
 
-function salvarEscola(editId){
+async function salvarEscola(editId){
   const info={
     nome:document.getElementById('meNome').value.trim(),
     sigla:document.getElementById('meSigla').value.trim(),
@@ -1053,12 +1174,23 @@ function salvarEscola(editId){
 
   if(editId){
     const s=SYSTEM.schools.find(x=>x.id===editId);
-    if(s)s.info=info;
+    if(s) {
+      s.info=info;
+      logSync('Escola atualizada: ' + info.nome, 'success');
+    }
   }else{
-    SYSTEM.schools.push(createSchoolData(info));
+    const novaEscola = createSchoolData(info);
+    SYSTEM.schools.push(novaEscola);
+    logSync('Nova escola criada: ' + info.nome + ' (ID: ' + novaEscola.id + ')', 'success');
   }
-  saveSystem();syncToFirebase();closeModal();
-  showToast('Escola salva!','success');
+  
+  closeModal();
+  saveSystem();
+  
+  // Forçar sincronização imediata
+  await salvarNoFirebase();
+  
+  showToast('Escola salva e sincronizada!','success');
   renderEscolas();
 }
 
@@ -1263,16 +1395,32 @@ function salvarDirector(editId,schoolId,previewId){
       Object.assign(u,data);
       if(foto)u.foto=foto;
       if(senha)u.senha=btoa(senha);
+      logSync('Director atualizado: ' + data.nome, 'success');
     }
   }else{
-    school.users.push({
-      id:generateId(),...data,
-      senha:btoa(senha),foto,ativo:true,dataCriacao:new Date().toISOString()
-    });
+    const novoDirector = {
+      id:generateId(),
+      ...data,
+      senha:btoa(senha),
+      foto,
+      ativo:true,
+      dataCriacao:new Date().toISOString()
+    };
+    school.users.push(novoDirector);
+    logSync('Novo director cadastrado: ' + data.nome + ' (ID: ' + novoDirector.id + ')', 'success');
   }
 
-  saveSystem();syncToFirebase();closeModal();
-  showToast('Director salvo!','success');
+  // Salvar e sincronizar
+  closeModal();
+  saveSystem();
+  
+  // Forçar sincronização imediata
+  salvarNoFirebase().then(() => {
+    showToast('Director salvo e sincronizado!','success');
+  }).catch(err => {
+    showToast('Director salvo localmente. Erro sync: ' + err.message,'warning');
+  });
+  
   renderDirectores();
 }
 
