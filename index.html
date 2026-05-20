@@ -230,6 +230,15 @@ const firebaseConfig={apiKey:"AIzaSyA4H1zY37rP2RKYzhqTfJrwfaZzFZF8bH4",authDomai
 firebase.initializeApp(firebaseConfig);
 const db=firebase.firestore();
 
+// Habilitar persistência offline
+db.enablePersistence({synchronizeTabs:true}).catch(err=>{
+  console.log('Persistência offline não disponível:',err.code);
+});
+
+let unsubscribeListener=null;
+let isSyncing=false;
+let lastSyncTime=0;
+
 // ============ GLOBAL STATE ============
 let SYSTEM={
   admin:null,
@@ -276,10 +285,18 @@ function createSchoolData(schoolInfo){
 }
 
 // ============ INIT ============
-function init(){
-  loadSystem();
+async function init(){
   populateProvincias();
   checkSync();
+  
+  // Carregar dados do Firebase primeiro (se online), senão do localStorage
+  await loadFromFirebaseFirst();
+  
+  // Iniciar listener em tempo real
+  if(isOnline){
+    startRealtimeListener();
+  }
+  
   if(!SYSTEM.config.setupDone||!SYSTEM.admin){
     showScreen('setupAdminScreen');
   }else{
@@ -302,17 +319,79 @@ function populateProvincias(){
 }
 
 // ============ STORAGE ============
-function saveSystem(){
-  try{localStorage.setItem('sge_system',JSON.stringify(SYSTEM));}catch(e){console.error(e);}
+function saveSystem(syncNow=true){
+  try{
+    // Atualizar versão para controle de sincronização
+    SYSTEM.version=Date.now();
+    localStorage.setItem('sge_system',JSON.stringify(SYSTEM));
+    
+    if(syncNow&&isOnline&&!isSyncing){
+      // Usar debounce para evitar muitas chamadas
+      clearTimeout(window.syncTimeout);
+      window.syncTimeout=setTimeout(()=>{
+        syncToFirebase();
+      },500);
+    }
+  }catch(e){console.error(e);}
 }
+
 function loadSystem(){
-  try{const d=localStorage.getItem('sge_system');if(d)SYSTEM=JSON.parse(d);}catch(e){console.error(e);}
+  try{
+    const d=localStorage.getItem('sge_system');
+    if(d)SYSTEM=JSON.parse(d);
+  }catch(e){console.error(e);}
+}
+
+// Carregar do Firebase primeiro, depois do localStorage como fallback
+async function loadFromFirebaseFirst(){
+  if(!isOnline){
+    loadSystem();
+    return;
+  }
+  
+  try{
+    showToast('A carregar dados...','info');
+    const doc=await db.collection('gestao_escolar').doc('sistema_principal').get();
+    
+    if(doc.exists){
+      const remoteData=doc.data();
+      if(remoteData.data){
+        SYSTEM=JSON.parse(remoteData.data);
+        localStorage.setItem('sge_system',JSON.stringify(SYSTEM));
+        console.log('Dados carregados do Firebase');
+      }
+    }else{
+      // Se não existe no Firebase, carregar do localStorage
+      loadSystem();
+      // E salvar no Firebase se tiver dados
+      if(SYSTEM.config.setupDone){
+        await syncToFirebase();
+      }
+    }
+  }catch(e){
+    console.error('Erro ao carregar do Firebase:',e);
+    loadSystem();
+  }
 }
 
 // ============ FIREBASE SYNC ============
 let isOnline=navigator.onLine;
-window.addEventListener('online',()=>{isOnline=true;checkSync();syncToFirebase();});
-window.addEventListener('offline',()=>{isOnline=false;checkSync();});
+
+window.addEventListener('online',()=>{
+  isOnline=true;
+  checkSync();
+  syncToFirebase();
+  startRealtimeListener();
+});
+
+window.addEventListener('offline',()=>{
+  isOnline=false;
+  checkSync();
+  if(unsubscribeListener){
+    unsubscribeListener();
+    unsubscribeListener=null;
+  }
+});
 
 function checkSync(){
   const dot=document.getElementById('syncDot');
@@ -321,28 +400,143 @@ function checkSync(){
   if(txt)txt.textContent=isOnline?'Online':'Offline';
 }
 
+// Sincronizar para o Firebase
 async function syncToFirebase(){
-  if(!isOnline)return;
+  if(!isOnline||isSyncing)return;
+  
+  const now=Date.now();
+  if(now-lastSyncTime<2000)return; // Evitar sync muito frequente
+  
+  isSyncing=true;
+  lastSyncTime=now;
+  
   try{
-    await db.collection('systems').doc('main').set({
+    const syncData={
       data:JSON.stringify(SYSTEM),
-      lastSync:new Date().toISOString()
-    });
-    showToast('Sincronizado!','success');
-  }catch(e){console.error(e);}
+      lastSync:firebase.firestore.FieldValue.serverTimestamp(),
+      lastSyncISO:new Date().toISOString(),
+      version:Date.now()
+    };
+    
+    await db.collection('gestao_escolar').doc('sistema_principal').set(syncData,{merge:true});
+    
+    console.log('✅ Dados sincronizados com Firebase');
+    updateSyncStatus('Sincronizado');
+  }catch(e){
+    console.error('❌ Erro ao sincronizar:',e);
+    updateSyncStatus('Erro sync');
+  }finally{
+    isSyncing=false;
+  }
 }
 
+// Listener em tempo real
+function startRealtimeListener(){
+  if(unsubscribeListener||!isOnline)return;
+  
+  console.log('🔄 Iniciando listener em tempo real...');
+  
+  unsubscribeListener=db.collection('gestao_escolar').doc('sistema_principal')
+    .onSnapshot((doc)=>{
+      if(doc.exists&&!isSyncing){
+        const remoteData=doc.data();
+        const remoteVersion=remoteData.version||0;
+        const localVersion=SYSTEM.version||0;
+        
+        // Só atualizar se a versão remota for mais recente
+        if(remoteVersion>localVersion&&remoteData.data){
+          try{
+            const newData=JSON.parse(remoteData.data);
+            newData.version=remoteVersion;
+            SYSTEM=newData;
+            localStorage.setItem('sge_system',JSON.stringify(SYSTEM));
+            
+            console.log('📥 Dados atualizados do Firebase em tempo real');
+            updateSyncStatus('Atualizado');
+            
+            // Atualizar a página atual se o usuário estiver logado
+            if(currentUser&&currentPage){
+              // Atualizar referências
+              if(currentSchool){
+                currentSchool=SYSTEM.schools.find(s=>s.id===currentSchool.id);
+              }
+              if(currentUser.perfil!=='admin_sistema'&&currentSchool){
+                currentUser=currentSchool.users.find(u=>u.id===currentUser.id)||currentUser;
+              }
+              
+              // Re-renderizar a página atual
+              navigateTo(currentPage);
+            }
+          }catch(e){
+            console.error('Erro ao processar dados remotos:',e);
+          }
+        }
+      }
+    },(error)=>{
+      console.error('Erro no listener:',error);
+      updateSyncStatus('Erro');
+    });
+}
+
+function updateSyncStatus(status){
+  const txt=document.getElementById('syncText');
+  if(txt){
+    txt.textContent=status;
+    setTimeout(()=>{
+      if(txt)txt.textContent=isOnline?'Online':'Offline';
+    },2000);
+  }
+}
+
+// Sincronizar do Firebase manualmente
 async function syncFromFirebase(){
-  if(!isOnline)return;
+  if(!isOnline)return showToast('Sem conexão à internet!','error');
+  
   try{
-    const doc=await db.collection('systems').doc('main').get();
-    if(doc.exists){
+    showToast('A sincronizar...','info');
+    const doc=await db.collection('gestao_escolar').doc('sistema_principal').get();
+    
+    if(doc.exists&&doc.data().data){
       SYSTEM=JSON.parse(doc.data().data);
-      saveSystem();
-      showToast('Dados restaurados!','success');
+      SYSTEM.version=doc.data().version||Date.now();
+      localStorage.setItem('sge_system',JSON.stringify(SYSTEM));
+      
+      // Atualizar referências
+      if(currentSchool){
+        currentSchool=SYSTEM.schools.find(s=>s.id===currentSchool.id);
+      }
+      
+      showToast('Dados restaurados com sucesso!','success');
       navigateTo(currentPage);
+    }else{
+      showToast('Nenhum dado encontrado no servidor','info');
     }
-  }catch(e){console.error(e);}
+  }catch(e){
+    console.error('Erro ao restaurar:',e);
+    showToast('Erro ao restaurar: '+e.message,'error');
+  }
+}
+
+// Forçar upload para Firebase
+async function forceUploadToFirebase(){
+  if(!isOnline)return showToast('Sem conexão!','error');
+  
+  isSyncing=true;
+  try{
+    SYSTEM.version=Date.now();
+    await db.collection('gestao_escolar').doc('sistema_principal').set({
+      data:JSON.stringify(SYSTEM),
+      lastSync:firebase.firestore.FieldValue.serverTimestamp(),
+      lastSyncISO:new Date().toISOString(),
+      version:SYSTEM.version
+    });
+    localStorage.setItem('sge_system',JSON.stringify(SYSTEM));
+    showToast('Dados enviados para a nuvem!','success');
+  }catch(e){
+    showToast('Erro: '+e.message,'error');
+  }finally{
+    isSyncing=false;
+  }
 }
 
 // ============ HELPERS ============
@@ -958,26 +1152,52 @@ function viewDirector(schoolId,dirId){
 
 // ============ ADMIN BACKUP ============
 function renderAdminBackup(){
+  const lastSync=SYSTEM.version?new Date(SYSTEM.version).toLocaleString('pt-AO'):'Nunca';
+  
   let html=`<div style="margin-bottom:24px">
     <h2 style="font-size:22px;font-weight:700">Backup & Sincronização</h2>
     <p style="color:#64748b">Gestão centralizada de backups do sistema</p>
   </div>
+  
+  <div class="card" style="margin-bottom:24px;background:linear-gradient(135deg,#1e3a8a,#3b82f6);color:#fff">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px">
+      <div>
+        <h3 style="margin-bottom:8px"><i class="fas fa-cloud"></i> Estado da Sincronização</h3>
+        <p style="opacity:.8"><strong>Estado:</strong> <span class="sync-indicator ${isOnline?'sync-online':'sync-offline'}" style="margin:0 8px"></span>${isOnline?'Conectado':'Desconectado'}</p>
+        <p style="opacity:.8"><strong>Última sincronização:</strong> ${lastSync}</p>
+        <p style="opacity:.8"><strong>Sincronização em tempo real:</strong> ${unsubscribeListener?'✅ Activa':'❌ Inactiva'}</p>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn" style="background:rgba(255,255,255,.2);color:#fff" onclick="forceUploadToFirebase()"><i class="fas fa-cloud-upload-alt"></i> Enviar Tudo</button>
+        <button class="btn" style="background:rgba(255,255,255,.2);color:#fff" onclick="syncFromFirebase()"><i class="fas fa-cloud-download-alt"></i> Baixar Tudo</button>
+      </div>
+    </div>
+  </div>
+  
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px">
     <div class="card" style="text-align:center">
       <div style="width:64px;height:64px;background:#dbeafe;border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px">
-        <i class="fas fa-cloud-upload-alt" style="font-size:28px;color:#2563eb"></i>
+        <i class="fas fa-sync-alt" style="font-size:28px;color:#2563eb"></i>
       </div>
-      <h3>Sincronizar com Firebase</h3>
-      <p style="color:#6b7280;font-size:13px;margin:8px 0">Enviar todos os dados para a nuvem</p>
-      <button class="btn btn-primary" onclick="syncToFirebase()"><i class="fas fa-upload"></i> Sincronizar</button>
+      <h3>Sincronização Automática</h3>
+      <p style="color:#6b7280;font-size:13px;margin:8px 0">Os dados são sincronizados automaticamente em tempo real entre todos os dispositivos</p>
+      <span class="badge ${unsubscribeListener?'badge-green':'badge-red'}">${unsubscribeListener?'Activa':'Inactiva'}</span>
     </div>
     <div class="card" style="text-align:center">
       <div style="width:64px;height:64px;background:#d1fae5;border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px">
-        <i class="fas fa-cloud-download-alt" style="font-size:28px;color:#059669"></i>
+        <i class="fas fa-cloud-upload-alt" style="font-size:28px;color:#059669"></i>
       </div>
-      <h3>Restaurar da Nuvem</h3>
-      <p style="color:#6b7280;font-size:13px;margin:8px 0">Baixar dados do Firebase</p>
-      <button class="btn btn-success" onclick="syncFromFirebase()"><i class="fas fa-download"></i> Restaurar</button>
+      <h3>Forçar Upload</h3>
+      <p style="color:#6b7280;font-size:13px;margin:8px 0">Enviar dados locais para substituir dados na nuvem</p>
+      <button class="btn btn-success" onclick="forceUploadToFirebase()"><i class="fas fa-upload"></i> Enviar</button>
+    </div>
+    <div class="card" style="text-align:center">
+      <div style="width:64px;height:64px;background:#fee2e2;border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px">
+        <i class="fas fa-cloud-download-alt" style="font-size:28px;color:#dc2626"></i>
+      </div>
+      <h3>Forçar Download</h3>
+      <p style="color:#6b7280;font-size:13px;margin:8px 0">Baixar dados da nuvem para substituir dados locais</p>
+      <button class="btn btn-danger" onclick="syncFromFirebase()"><i class="fas fa-download"></i> Baixar</button>
     </div>
     <div class="card" style="text-align:center">
       <div style="width:64px;height:64px;background:#fef3c7;border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px">
@@ -991,12 +1211,81 @@ function renderAdminBackup(){
       <div style="width:64px;height:64px;background:#ede9fe;border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px">
         <i class="fas fa-file-archive" style="font-size:28px;color:#7c3aed"></i>
       </div>
-      <h3>Backup JSON Completo</h3>
-      <p style="color:#6b7280;font-size:13px;margin:8px 0">Exportar todo o sistema</p>
+      <h3>Backup JSON</h3>
+      <p style="color:#6b7280;font-size:13px;margin:8px 0">Exportar todo o sistema em JSON</p>
       <button class="btn btn-outline" onclick="backupJSON()"><i class="fas fa-download"></i> Exportar</button>
     </div>
+    <div class="card" style="text-align:center">
+      <div style="width:64px;height:64px;background:#fce7f3;border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px">
+        <i class="fas fa-file-import" style="font-size:28px;color:#db2777"></i>
+      </div>
+      <h3>Importar JSON</h3>
+      <p style="color:#6b7280;font-size:13px;margin:8px 0">Restaurar de um ficheiro JSON</p>
+      <input type="file" id="importJSONFile" accept=".json" style="display:none" onchange="importJSON(this)">
+      <button class="btn btn-outline" onclick="document.getElementById('importJSONFile').click()"><i class="fas fa-upload"></i> Importar</button>
+    </div>
+  </div>
+  
+  <div class="card" style="margin-top:24px">
+    <h3 style="margin-bottom:16px"><i class="fas fa-shield-alt" style="color:var(--primary)"></i> Regras de Segurança do Firebase</h3>
+    <p style="color:#6b7280;margin-bottom:16px">Copie estas regras e cole no <strong>Firebase Console → Firestore → Regras</strong></p>
+    <div style="background:#1e293b;border-radius:8px;padding:16px;overflow-x:auto">
+      <pre style="color:#e2e8f0;font-family:monospace;font-size:13px;margin:0;white-space:pre-wrap">rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Permitir leitura e escrita na colecção gestao_escolar
+    match /gestao_escolar/{document=**} {
+      allow read, write: if true;
+    }
+  }
+}</pre>
+    </div>
+    <button class="btn btn-outline" style="margin-top:12px" onclick="copyFirebaseRules()"><i class="fas fa-copy"></i> Copiar Regras</button>
   </div>`;
+  
   document.getElementById('pageContent').innerHTML=html;
+}
+
+function copyFirebaseRules(){
+  const rules=`rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /gestao_escolar/{document=**} {
+      allow read, write: if true;
+    }
+  }
+}`;
+  navigator.clipboard.writeText(rules).then(()=>{
+    showToast('Regras copiadas!','success');
+  }).catch(()=>{
+    showToast('Erro ao copiar','error');
+  });
+}
+
+function importJSON(input){
+  const file=input.files[0];
+  if(!file)return;
+  
+  const reader=new FileReader();
+  reader.onload=async(e)=>{
+    try{
+      const data=JSON.parse(e.target.result);
+      if(data.config&&data.schools!==undefined){
+        SYSTEM=data;
+        SYSTEM.version=Date.now();
+        saveSystem(false);
+        await forceUploadToFirebase();
+        showToast('Dados importados e sincronizados!','success');
+        navigateTo('adminDashboard');
+      }else{
+        showToast('Ficheiro JSON inválido!','error');
+      }
+    }catch(err){
+      showToast('Erro ao importar: '+err.message,'error');
+    }
+  };
+  reader.readAsText(file);
+  input.value='';
 }
 
 function backupGeralXLS(){
@@ -2409,10 +2698,24 @@ function exportarEscolaPDF(){
 // ============ BACKUP ESCOLA ============
 function renderBackup(){
   if(!currentSchool)return;
+  const lastSync=SYSTEM.version?new Date(SYSTEM.version).toLocaleString('pt-AO'):'Nunca';
+  
   let html=`<div style="margin-bottom:24px">
-    <h2 style="font-size:22px;font-weight:700">Backup</h2>
-    <p style="color:#64748b">Exportar dados da escola</p>
+    <h2 style="font-size:22px;font-weight:700">Backup & Sincronização</h2>
+    <p style="color:#64748b">Exportar e sincronizar dados da escola</p>
   </div>
+  
+  <div class="card" style="margin-bottom:24px;background:linear-gradient(135deg,#059669,#10b981);color:#fff">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px">
+      <div>
+        <h3><i class="fas fa-cloud"></i> Sincronização em Tempo Real</h3>
+        <p style="opacity:.8">Estado: <span class="sync-indicator ${isOnline?'sync-online':'sync-offline'}"></span> ${isOnline?'Conectado':'Desconectado'}</p>
+        <p style="opacity:.8">Última sync: ${lastSync}</p>
+      </div>
+      <button class="btn" style="background:rgba(255,255,255,.2);color:#fff" onclick="forceUploadToFirebase()"><i class="fas fa-sync"></i> Sincronizar Agora</button>
+    </div>
+  </div>
+  
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px">
     <div class="card" style="text-align:center">
       <div style="width:64px;height:64px;background:#fef3c7;border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px"><i class="fas fa-file-excel" style="font-size:28px;color:#d97706"></i></div>
@@ -2425,6 +2728,12 @@ function renderBackup(){
       <h3>Backup JSON</h3>
       <p style="color:#6b7280;font-size:13px;margin:8px 0">Exportar dados da escola em JSON</p>
       <button class="btn btn-outline" onclick="backupEscolaJSON()"><i class="fas fa-download"></i> Exportar</button>
+    </div>
+    <div class="card" style="text-align:center">
+      <div style="width:64px;height:64px;background:#fee2e2;border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px"><i class="fas fa-file-pdf" style="font-size:28px;color:#dc2626"></i></div>
+      <h3>Relatório PDF</h3>
+      <p style="color:#6b7280;font-size:13px;margin:8px 0">Exportar relatório geral em PDF</p>
+      <button class="btn btn-danger" onclick="exportarEscolaPDF()"><i class="fas fa-download"></i> Exportar</button>
     </div>
   </div>`;
   document.getElementById('pageContent').innerHTML=html;
@@ -2535,8 +2844,18 @@ function deleteSchoolItem(collection,id){
 // ============ MODAL CLICK OUTSIDE ============
 document.getElementById('modal').addEventListener('click',function(e){if(e.target===this)closeModal();});
 
-// ============ AUTO SYNC ============
-setInterval(()=>{if(isOnline&&currentUser)syncToFirebase().catch(()=>{});},300000);
+// ============ VERIFICAR CONEXÃO PERIODICAMENTE ============
+setInterval(()=>{
+  const wasOnline=isOnline;
+  isOnline=navigator.onLine;
+  
+  if(isOnline&&!wasOnline){
+    // Reconectou - reiniciar listener
+    startRealtimeListener();
+    syncToFirebase();
+  }
+  checkSync();
+},10000);
 
 // ============ INIT ============
 window.addEventListener('DOMContentLoaded',init);
