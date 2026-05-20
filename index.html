@@ -1,0 +1,2545 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sistema de Gestão Escolar - Angola</title>
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.1/jspdf.plugin.autotable.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/docx@8.2.3/build/index.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+*{margin:0;padding:0;box-sizing:border-box;font-family:'Inter',sans-serif}
+:root{--primary:#1e40af;--primary-dark:#1e3a8a;--secondary:#059669;--accent:#f59e0b;--danger:#dc2626;--bg:#f0f4f8;--sidebar-w:260px}
+body{background:var(--bg);min-height:100vh}
+.login-bg{background:linear-gradient(135deg,#0f172a 0%,#1e3a8a 50%,#1e40af 100%);min-height:100vh;display:flex;align-items:center;justify-content:center}
+.glass{background:rgba(255,255,255,0.1);backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,0.2);border-radius:20px}
+.sidebar{width:var(--sidebar-w);background:linear-gradient(180deg,#0f172a 0%,#1e3a8a 100%);height:100vh;position:fixed;left:0;top:0;z-index:50;transition:transform .3s;overflow-y:auto}
+.sidebar.collapsed{transform:translateX(-100%)}
+.main-content{margin-left:var(--sidebar-w);transition:margin .3s;min-height:100vh}
+.main-content.expanded{margin-left:0}
+.sidebar-link{display:flex;align-items:center;padding:12px 20px;color:rgba(255,255,255,.7);text-decoration:none;transition:all .3s;border-left:3px solid transparent;font-size:14px}
+.sidebar-link:hover,.sidebar-link.active{background:rgba(255,255,255,.1);color:#fff;border-left-color:#f59e0b}
+.sidebar-link i{width:24px;margin-right:12px;text-align:center}
+.card{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:24px;transition:transform .2s,box-shadow .2s}
+.card:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,.12)}
+.stat-card{background:linear-gradient(135deg,var(--c1),var(--c2));border-radius:16px;padding:24px;color:#fff;position:relative;overflow:hidden}
+.stat-card::after{content:'';position:absolute;top:-20px;right:-20px;width:100px;height:100px;background:rgba(255,255,255,.1);border-radius:50%}
+.btn{padding:10px 20px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:14px;transition:all .3s;display:inline-flex;align-items:center;gap:8px}
+.btn-primary{background:var(--primary);color:#fff}
+.btn-primary:hover{background:var(--primary-dark)}
+.btn-success{background:var(--secondary);color:#fff}
+.btn-success:hover{background:#047857}
+.btn-danger{background:var(--danger);color:#fff}
+.btn-danger:hover{background:#b91c1c}
+.btn-warning{background:var(--accent);color:#fff}
+.btn-warning:hover{background:#d97706}
+.btn-outline{background:transparent;border:2px solid var(--primary);color:var(--primary)}
+.btn-outline:hover{background:var(--primary);color:#fff}
+.btn-sm{padding:6px 12px;font-size:12px}
+.form-group{margin-bottom:16px}
+.form-group label{display:block;margin-bottom:6px;font-weight:500;color:#374151;font-size:14px}
+.form-input{width:100%;padding:10px 14px;border:2px solid #e5e7eb;border-radius:8px;font-size:14px;transition:border-color .3s;outline:none}
+.form-input:focus{border-color:var(--primary)}
+select.form-input{appearance:none;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23374151' d='M6 8L1 3h10z'/%3E%3C/svg%3E") no-repeat right 12px center #fff;padding-right:36px}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:1000;opacity:0;visibility:hidden;transition:all .3s}
+.modal-overlay.active{opacity:1;visibility:visible}
+.modal-content{background:#fff;border-radius:16px;max-width:900px;width:95%;max-height:90vh;overflow-y:auto;transform:scale(.9);transition:transform .3s}
+.modal-overlay.active .modal-content{transform:scale(1)}
+.modal-header{padding:20px 24px;border-bottom:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:#fff;z-index:10;border-radius:16px 16px 0 0}
+.modal-body{padding:24px}
+.table-container{overflow-x:auto}
+table.data-table{width:100%;border-collapse:collapse;font-size:14px}
+table.data-table th{background:#f8fafc;padding:12px 16px;text-align:left;font-weight:600;color:#374151;border-bottom:2px solid #e5e7eb;white-space:nowrap}
+table.data-table td{padding:12px 16px;border-bottom:1px solid #f1f5f9}
+table.data-table tr:hover{background:#f8fafc}
+.badge{padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;display:inline-block}
+.badge-green{background:#d1fae5;color:#065f46}
+.badge-red{background:#fee2e2;color:#991b1b}
+.badge-blue{background:#dbeafe;color:#1e40af}
+.badge-yellow{background:#fef3c7;color:#92400e}
+.badge-purple{background:#ede9fe;color:#5b21b6}
+.avatar{width:40px;height:40px;border-radius:50%;object-fit:cover;border:2px solid #e5e7eb;background:#e5e7eb}
+.avatar-lg{width:80px;height:80px}
+.avatar-xl{width:120px;height:120px}
+.toast{position:fixed;top:20px;right:20px;padding:16px 24px;border-radius:10px;color:#fff;font-weight:500;z-index:9999;transform:translateX(400px);transition:transform .4s cubic-bezier(.68,-.55,.265,1.55);box-shadow:0 4px 12px rgba(0,0,0,.15)}
+.toast.show{transform:translateX(0)}
+.toast-success{background:#059669}
+.toast-error{background:#dc2626}
+.toast-info{background:#2563eb}
+.photo-upload{width:120px;height:120px;border-radius:50%;border:3px dashed #d1d5db;display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;position:relative;margin:0 auto 16px}
+.photo-upload img{width:100%;height:100%;object-fit:cover}
+.photo-upload .overlay{position:absolute;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .3s}
+.photo-upload:hover .overlay{opacity:1}
+.tab-nav{display:flex;border-bottom:2px solid #e5e7eb;margin-bottom:24px;overflow-x:auto}
+.tab-btn{padding:12px 24px;border:none;background:none;cursor:pointer;font-weight:500;color:#6b7280;border-bottom:2px solid transparent;margin-bottom:-2px;white-space:nowrap;transition:all .3s}
+.tab-btn.active{color:var(--primary);border-bottom-color:var(--primary)}
+.sidebar-section{padding:8px 20px;color:rgba(255,255,255,.4);font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-top:16px}
+.notification-dot{width:8px;height:8px;background:#ef4444;border-radius:50%;position:absolute;top:0;right:0}
+.progress-bar{height:8px;background:#e5e7eb;border-radius:4px;overflow:hidden}
+.progress-fill{height:100%;border-radius:4px;transition:width .5s}
+.sync-indicator{width:10px;height:10px;border-radius:50%;display:inline-block}
+.sync-online{background:#10b981;animation:pulse 2s infinite}
+.sync-offline{background:#ef4444}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+@keyframes spin{to{transform:rotate(360deg)}}
+.spinner{animation:spin 1s linear infinite}
+.school-card{border:2px solid #e5e7eb;border-radius:16px;padding:24px;text-align:center;cursor:pointer;transition:all .3s}
+.school-card:hover{border-color:var(--primary);box-shadow:0 4px 12px rgba(30,64,175,.2)}
+.school-card.selected{border-color:var(--primary);background:#eff6ff}
+.filter-row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px;padding:16px;background:#f8fafc;border-radius:12px}
+.filter-row .form-input{width:auto;min-width:180px}
+.checkbox-item{display:flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid #e5e7eb;border-radius:8px;cursor:pointer;transition:all .2s}
+.checkbox-item:hover{background:#f8fafc}
+.checkbox-item.checked{background:#eff6ff;border-color:var(--primary)}
+@media(max-width:768px){.sidebar{transform:translateX(-100%)}.sidebar.mobile-open{transform:translateX(0)}.main-content{margin-left:0!important}.filter-row{flex-direction:column}.filter-row .form-input{width:100%}}
+</style>
+</head>
+<body>
+<div id="toast" class="toast"></div>
+
+<!-- SETUP ADMIN SCREEN -->
+<div id="setupAdminScreen" class="login-bg" style="display:none">
+<div class="glass" style="padding:40px;max-width:600px;width:95%">
+  <div style="text-align:center;margin-bottom:30px">
+    <div style="width:80px;height:80px;background:rgba(255,255,255,.2);border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 16px">
+      <i class="fas fa-user-shield" style="font-size:36px;color:#fff"></i>
+    </div>
+    <h1 style="color:#fff;font-size:24px;margin-bottom:8px">Sistema de Gestão Escolar</h1>
+    <p style="color:rgba(255,255,255,.7);font-size:14px">Configuração Inicial - Cadastro do Administrador Geral</p>
+  </div>
+  <div style="background:rgba(255,255,255,.95);border-radius:12px;padding:24px">
+    <div class="photo-upload" onclick="document.getElementById('adminPhoto').click()">
+      <img id="adminPhotoPreview" src="" style="display:none">
+      <div id="adminPhotoPlaceholder"><i class="fas fa-camera" style="font-size:24px;color:#9ca3af"></i></div>
+      <div class="overlay"><i class="fas fa-camera" style="color:#fff;font-size:20px"></i></div>
+    </div>
+    <input type="file" id="adminPhoto" accept="image/*" style="display:none" onchange="previewPhoto(this,'adminPhotoPreview','adminPhotoPlaceholder')">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label>Nome Completo *</label><input class="form-input" id="adminNome" required></div>
+      <div class="form-group"><label>Nº do BI *</label><input class="form-input" id="adminBI"></div>
+      <div class="form-group"><label>Data de Nascimento *</label><input type="date" class="form-input" id="adminNasc"></div>
+      <div class="form-group"><label>Género *</label><select class="form-input" id="adminGenero"><option value="">Selecione</option><option>Masculino</option><option>Feminino</option></select></div>
+      <div class="form-group"><label>Província *</label><select class="form-input" id="adminProvincia"></select></div>
+      <div class="form-group"><label>Município</label><input class="form-input" id="adminMunicipio"></div>
+      <div class="form-group"><label>Telefone *</label><input class="form-input" id="adminTelefone" placeholder="+244"></div>
+      <div class="form-group"><label>Email *</label><input type="email" class="form-input" id="adminEmail"></div>
+    </div>
+    <hr style="margin:16px 0;border-color:#e5e7eb">
+    <h3 style="margin-bottom:12px;color:#374151;font-size:16px"><i class="fas fa-key"></i> Credenciais de Acesso</h3>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label>Nome de Utilizador *</label><input class="form-input" id="adminUsername"></div>
+      <div class="form-group"><label>Senha *</label><input type="password" class="form-input" id="adminSenha"></div>
+      <div class="form-group" style="grid-column:span 2"><label>Confirmar Senha *</label><input type="password" class="form-input" id="adminSenha2"></div>
+    </div>
+    <button class="btn btn-primary" style="width:100%;margin-top:8px;padding:14px;font-size:16px" onclick="setupAdmin()">
+      <i class="fas fa-check-circle"></i> Concluir Configuração
+    </button>
+  </div>
+</div>
+</div>
+
+<!-- LOGIN SCREEN -->
+<div id="loginScreen" class="login-bg" style="display:none">
+<div class="glass" style="padding:40px;max-width:440px;width:95%">
+  <div style="text-align:center;margin-bottom:30px">
+    <div style="width:80px;height:80px;background:rgba(255,255,255,.2);border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 16px">
+      <i class="fas fa-graduation-cap" style="font-size:36px;color:#fff"></i>
+    </div>
+    <h1 style="color:#fff;font-size:22px;margin-bottom:4px">Sistema de Gestão Escolar</h1>
+    <p style="color:rgba(255,255,255,.6);font-size:13px">Angola - Plataforma Multi-Escolas</p>
+  </div>
+  <div style="background:rgba(255,255,255,.95);border-radius:12px;padding:24px">
+    <div class="form-group"><label>Nome de Utilizador</label><input class="form-input" id="loginUser" placeholder="Digite seu utilizador"></div>
+    <div class="form-group"><label>Senha</label><input type="password" class="form-input" id="loginPass" placeholder="Digite sua senha" onkeypress="if(event.key==='Enter')doLogin()"></div>
+    <button class="btn btn-primary" style="width:100%;padding:14px;font-size:16px" onclick="doLogin()">
+      <i class="fas fa-sign-in-alt"></i> Entrar
+    </button>
+  </div>
+  <p style="text-align:center;color:rgba(255,255,255,.5);margin-top:16px;font-size:12px">© 2024 Sistema de Gestão Escolar - Angola</p>
+</div>
+</div>
+
+<!-- SCHOOL SELECT SCREEN -->
+<div id="schoolSelectScreen" class="login-bg" style="display:none">
+<div style="max-width:900px;width:95%;padding:40px">
+  <div style="text-align:center;margin-bottom:30px">
+    <h1 style="color:#fff;font-size:28px;margin-bottom:8px">Selecione a Escola</h1>
+    <p style="color:rgba(255,255,255,.7)">Escolha a escola para aceder ao sistema</p>
+  </div>
+  <div id="schoolsList" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:20px"></div>
+  <div style="text-align:center;margin-top:24px">
+    <button class="btn btn-outline" style="border-color:rgba(255,255,255,.3);color:#fff" onclick="doLogout()">
+      <i class="fas fa-arrow-left"></i> Voltar ao Login
+    </button>
+  </div>
+</div>
+</div>
+
+<!-- MAIN DASHBOARD -->
+<div id="dashboardScreen" style="display:none">
+<nav class="sidebar" id="sidebar">
+  <div style="padding:20px;text-align:center;border-bottom:1px solid rgba(255,255,255,.1)">
+    <div style="width:50px;height:50px;background:rgba(255,255,255,.15);border-radius:12px;display:flex;align-items:center;justify-content:center;margin:0 auto 8px">
+      <i class="fas fa-school" style="font-size:22px;color:#fff"></i>
+    </div>
+    <h3 style="color:#fff;font-size:13px" id="sidebarSchoolName">Sistema de Gestão</h3>
+    <p style="color:rgba(255,255,255,.5);font-size:11px" id="sidebarRole"></p>
+  </div>
+  <div id="sidebarMenu"></div>
+  <div style="position:absolute;bottom:0;left:0;right:0;padding:16px;border-top:1px solid rgba(255,255,255,.1)">
+    <a href="#" class="sidebar-link" onclick="doLogout()" style="padding:10px 20px"><i class="fas fa-sign-out-alt"></i> Terminar Sessão</a>
+  </div>
+</nav>
+
+<div class="main-content" id="mainContent">
+<header style="background:#fff;padding:16px 24px;display:flex;justify-content:space-between;align-items:center;box-shadow:0 1px 3px rgba(0,0,0,.05);position:sticky;top:0;z-index:40">
+  <div style="display:flex;align-items:center;gap:16px">
+    <button onclick="toggleSidebar()" style="background:none;border:none;cursor:pointer;font-size:20px;color:#374151"><i class="fas fa-bars"></i></button>
+    <div id="breadcrumb" style="font-size:14px;color:#6b7280"></div>
+  </div>
+  <div style="display:flex;align-items:center;gap:16px">
+    <span class="sync-indicator" id="syncDot"></span>
+    <span style="font-size:12px;color:#6b7280" id="syncText"></span>
+    <div style="display:flex;align-items:center;gap:10px;cursor:pointer" onclick="showProfile()">
+      <img class="avatar" id="headerAvatar" src="">
+      <div>
+        <div style="font-weight:600;font-size:14px" id="headerName"></div>
+        <div style="font-size:12px;color:#6b7280" id="headerRole"></div>
+      </div>
+    </div>
+  </div>
+</header>
+<div style="padding:24px" id="pageContent"></div>
+</div>
+</div>
+
+<!-- MODAL -->
+<div class="modal-overlay" id="modal">
+  <div class="modal-content" id="modalContent"></div>
+</div>
+
+<script>
+// ============ FIREBASE ============
+const firebaseConfig={apiKey:"AIzaSyA4H1zY37rP2RKYzhqTfJrwfaZzFZF8bH4",authDomain:"gestaoescolas-7ed29.firebaseapp.com",projectId:"gestaoescolas-7ed29",storageBucket:"gestaoescolas-7ed29.firebasestorage.app",messagingSenderId:"206339174100",appId:"1:206339174100:web:a621efb2a3059243ffd541"};
+firebase.initializeApp(firebaseConfig);
+const db=firebase.firestore();
+
+// ============ GLOBAL STATE ============
+let SYSTEM={
+  admin:null,
+  schools:[],
+  config:{setupDone:false,systemName:'Sistema de Gestão Escolar - Angola'}
+};
+
+let currentUser=null;
+let currentSchool=null;
+let currentPage='dashboard';
+
+const PROVINCIAS=['Bengo','Benguela','Bié','Cabinda','Cuando Cubango','Cuanza Norte','Cuanza Sul','Cunene','Huambo','Huíla','Luanda','Lunda Norte','Lunda Sul','Malanje','Moxico','Namibe','Uíge','Zaire'];
+const PERFIS={
+  'admin_sistema':'Administrador do Sistema',
+  'director_geral':'Director Geral',
+  'subdirector_pedagogico':'Subdirector Pedagógico',
+  'subdirector_administrativo':'Subdirector Administrativo',
+  'secretaria':'Secretário(a)',
+  'professor':'Professor(a)',
+  'encarregado':'Encarregado de Educação'
+};
+const CLASSES=['Iniciação','1ª Classe','2ª Classe','3ª Classe','4ª Classe','5ª Classe','6ª Classe','7ª Classe','8ª Classe','9ª Classe','10ª Classe','11ª Classe','12ª Classe','13ª Classe'];
+
+// ============ SCHOOL DATA TEMPLATE ============
+function createSchoolData(schoolInfo){
+  return{
+    id:generateId(),
+    info:schoolInfo,
+    users:[],
+    students:[],
+    classes:[],
+    turmas:[],
+    turnos:[],
+    disciplinas:[],
+    anoLetivo:[],
+    trimestres:[],
+    notas:[],
+    matriculas:[],
+    mensagens:[],
+    comunicados:[],
+    frequencia:[],
+    dataCriacao:new Date().toISOString()
+  };
+}
+
+// ============ INIT ============
+function init(){
+  loadSystem();
+  populateProvincias();
+  checkSync();
+  if(!SYSTEM.config.setupDone||!SYSTEM.admin){
+    showScreen('setupAdminScreen');
+  }else{
+    showScreen('loginScreen');
+  }
+}
+
+function showScreen(id){
+  ['setupAdminScreen','loginScreen','schoolSelectScreen','dashboardScreen'].forEach(s=>{
+    document.getElementById(s).style.display='none';
+  });
+  const el=document.getElementById(id);
+  el.style.display=id==='dashboardScreen'?'block':'flex';
+}
+
+function populateProvincias(){
+  document.querySelectorAll('#adminProvincia').forEach(sel=>{
+    sel.innerHTML='<option value="">Selecione</option>'+PROVINCIAS.map(p=>`<option>${p}</option>`).join('');
+  });
+}
+
+// ============ STORAGE ============
+function saveSystem(){
+  try{localStorage.setItem('sge_system',JSON.stringify(SYSTEM));}catch(e){console.error(e);}
+}
+function loadSystem(){
+  try{const d=localStorage.getItem('sge_system');if(d)SYSTEM=JSON.parse(d);}catch(e){console.error(e);}
+}
+
+// ============ FIREBASE SYNC ============
+let isOnline=navigator.onLine;
+window.addEventListener('online',()=>{isOnline=true;checkSync();syncToFirebase();});
+window.addEventListener('offline',()=>{isOnline=false;checkSync();});
+
+function checkSync(){
+  const dot=document.getElementById('syncDot');
+  const txt=document.getElementById('syncText');
+  if(dot)dot.className='sync-indicator '+(isOnline?'sync-online':'sync-offline');
+  if(txt)txt.textContent=isOnline?'Online':'Offline';
+}
+
+async function syncToFirebase(){
+  if(!isOnline)return;
+  try{
+    await db.collection('systems').doc('main').set({
+      data:JSON.stringify(SYSTEM),
+      lastSync:new Date().toISOString()
+    });
+    showToast('Sincronizado!','success');
+  }catch(e){console.error(e);}
+}
+
+async function syncFromFirebase(){
+  if(!isOnline)return;
+  try{
+    const doc=await db.collection('systems').doc('main').get();
+    if(doc.exists){
+      SYSTEM=JSON.parse(doc.data().data);
+      saveSystem();
+      showToast('Dados restaurados!','success');
+      navigateTo(currentPage);
+    }
+  }catch(e){console.error(e);}
+}
+
+// ============ HELPERS ============
+function showToast(msg,type='info'){
+  const t=document.getElementById('toast');
+  t.textContent=msg;t.className='toast toast-'+type+' show';
+  setTimeout(()=>t.classList.remove('show'),3500);
+}
+function generateId(){return'id_'+Date.now()+'_'+Math.random().toString(36).substr(2,9);}
+function openModal(html){document.getElementById('modalContent').innerHTML=html;document.getElementById('modal').classList.add('active');}
+function closeModal(){document.getElementById('modal').classList.remove('active');}
+function toggleSidebar(){
+  const sb=document.getElementById('sidebar'),mc=document.getElementById('mainContent');
+  if(window.innerWidth<=768){sb.classList.toggle('mobile-open');}
+  else{sb.classList.toggle('collapsed');mc.classList.toggle('expanded');}
+}
+function formatDate(d){if(!d)return'-';return new Date(d).toLocaleDateString('pt-AO');}
+function calcAge(d){if(!d)return'-';const b=new Date(d),n=new Date();let a=n.getFullYear()-b.getFullYear();if(n.getMonth()<b.getMonth()||(n.getMonth()===b.getMonth()&&n.getDate()<b.getDate()))a--;return a;}
+function defaultAvatar(){return"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='50' fill='%23e5e7eb'/%3E%3Ccircle cx='50' cy='38' r='18' fill='%239ca3af'/%3E%3Cellipse cx='50' cy='80' rx='30' ry='22' fill='%239ca3af'/%3E%3C/svg%3E";}
+
+function previewPhoto(input,previewId,placeholderId){
+  const file=input.files[0];if(!file)return;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    const img=document.getElementById(previewId);
+    img.src=e.target.result;img.style.display='block';
+    if(placeholderId)document.getElementById(placeholderId).style.display='none';
+  };
+  reader.readAsDataURL(file);
+}
+function getPhotoData(previewId){
+  const img=document.getElementById(previewId);
+  return img&&img.src&&img.src.startsWith('data:')?img.src:'';
+}
+
+// ============ SETUP ADMIN ============
+function setupAdmin(){
+  const nome=document.getElementById('adminNome').value.trim();
+  const bi=document.getElementById('adminBI').value.trim();
+  const nasc=document.getElementById('adminNasc').value;
+  const genero=document.getElementById('adminGenero').value;
+  const provincia=document.getElementById('adminProvincia').value;
+  const municipio=document.getElementById('adminMunicipio').value;
+  const telefone=document.getElementById('adminTelefone').value;
+  const email=document.getElementById('adminEmail').value;
+  const username=document.getElementById('adminUsername').value.trim();
+  const senha=document.getElementById('adminSenha').value;
+  const senha2=document.getElementById('adminSenha2').value;
+  const foto=getPhotoData('adminPhotoPreview');
+
+  if(!nome||!username||!senha)return showToast('Preencha os campos obrigatórios!','error');
+  if(senha!==senha2)return showToast('As senhas não coincidem!','error');
+  if(senha.length<4)return showToast('Senha deve ter pelo menos 4 caracteres!','error');
+
+  SYSTEM.admin={
+    id:generateId(),nome,bi,dataNascimento:nasc,genero,provincia,municipio,telefone,email,
+    username,senha:btoa(senha),perfil:'admin_sistema',foto,ativo:true,dataCriacao:new Date().toISOString()
+  };
+  SYSTEM.config.setupDone=true;
+  saveSystem();syncToFirebase();
+  showToast('Administrador cadastrado!','success');
+  setTimeout(()=>showScreen('loginScreen'),1500);
+}
+
+// ============ LOGIN ============
+function doLogin(){
+  const user=document.getElementById('loginUser').value.trim();
+  const pass=document.getElementById('loginPass').value;
+  if(!user||!pass)return showToast('Preencha todos os campos!','error');
+
+  // Check system admin
+  if(SYSTEM.admin&&SYSTEM.admin.username===user&&atob(SYSTEM.admin.senha)===pass){
+    currentUser=SYSTEM.admin;
+    currentSchool=null;
+    showScreen('dashboardScreen');
+    buildSidebar();
+    updateHeader();
+    navigateTo('adminDashboard');
+    showToast('Bem-vindo, '+currentUser.nome+'!','success');
+    return;
+  }
+
+  // Check school users
+  for(const school of SYSTEM.schools){
+    const found=school.users.find(u=>u.username===user&&atob(u.senha)===pass&&u.ativo);
+    if(found){
+      currentUser=found;
+      currentSchool=school;
+      showScreen('dashboardScreen');
+      buildSidebar();
+      updateHeader();
+      navigateTo('dashboard');
+      showToast('Bem-vindo, '+currentUser.nome+'!','success');
+      return;
+    }
+  }
+
+  showToast('Credenciais inválidas!','error');
+}
+
+function doLogout(){
+  currentUser=null;
+  currentSchool=null;
+  showScreen('loginScreen');
+  document.getElementById('loginUser').value='';
+  document.getElementById('loginPass').value='';
+}
+
+// ============ SIDEBAR ============
+function buildSidebar(){
+  const p=currentUser.perfil;
+  let menus=[];
+
+  if(p==='admin_sistema'){
+    menus=[
+      {icon:'fa-home',label:'Painel Admin',page:'adminDashboard'},
+      {icon:'fa-school',label:'Escolas',page:'escolas'},
+      {icon:'fa-users-cog',label:'Directores',page:'directores'},
+      {icon:'fa-database',label:'Backup/Sync',page:'adminBackup'},
+      {icon:'fa-chart-bar',label:'Relatórios Gerais',page:'adminRelatorios'}
+    ];
+  }else{
+    menus.push({icon:'fa-home',label:'Painel Inicial',page:'dashboard'});
+    if(['director_geral','subdirector_pedagogico','subdirector_administrativo','secretaria'].includes(p)){
+      menus.push({icon:'fa-calendar-alt',label:'Ano Lectivo',page:'anoLetivo'});
+      menus.push({icon:'fa-clock',label:'Trimestres',page:'trimestres'});
+    }
+    if(['director_geral','subdirector_administrativo','secretaria'].includes(p)){
+      menus.push({icon:'fa-users-cog',label:'Utilizadores',page:'users'});
+    }
+    if(['director_geral','subdirector_pedagogico','secretaria'].includes(p)){
+      menus.push({icon:'fa-chalkboard',label:'Classes',page:'classes'});
+      menus.push({icon:'fa-users',label:'Turmas',page:'turmas'});
+      menus.push({icon:'fa-sun',label:'Turnos',page:'turnos'});
+      menus.push({icon:'fa-book',label:'Disciplinas',page:'disciplinas'});
+    }
+    if(['director_geral','subdirector_pedagogico','subdirector_administrativo','secretaria'].includes(p)){
+      menus.push({icon:'fa-chalkboard-teacher',label:'Professores',page:'professores'});
+    }
+    menus.push({icon:'fa-user-graduate',label:'Alunos',page:'alunos'});
+    if(['director_geral','subdirector_pedagogico','secretaria'].includes(p)){
+      menus.push({icon:'fa-clipboard-list',label:'Matrículas',page:'matriculas'});
+    }
+    if(['director_geral','subdirector_pedagogico','professor','secretaria'].includes(p)){
+      menus.push({icon:'fa-star',label:'Notas / Pautas',page:'notas'});
+    }
+    if(['director_geral','subdirector_pedagogico','professor'].includes(p)){
+      menus.push({icon:'fa-calendar-check',label:'Frequência',page:'frequencia'});
+    }
+    if(['director_geral','secretaria'].includes(p)){
+      menus.push({icon:'fa-file-alt',label:'Documentos',page:'documentos'});
+    }
+    menus.push({icon:'fa-envelope',label:'Mensagens',page:'mensagens'});
+    menus.push({icon:'fa-bullhorn',label:'Comunicados',page:'comunicados'});
+    if(['director_geral','subdirector_administrativo'].includes(p)){
+      menus.push({icon:'fa-chart-bar',label:'Relatórios',page:'relatorios'});
+      menus.push({icon:'fa-database',label:'Backup',page:'backup'});
+    }
+  }
+  menus.push({icon:'fa-cog',label:'Meu Perfil',page:'perfil'});
+
+  document.getElementById('sidebarRole').textContent=PERFIS[p];
+  document.getElementById('sidebarSchoolName').textContent=currentSchool?currentSchool.info.nome:'Sistema Admin';
+
+  let html='<div style="margin-top:8px">';
+  menus.forEach(m=>{
+    html+=`<a href="#" class="sidebar-link ${currentPage===m.page?'active':''}" onclick="navigateTo('${m.page}');return false;"><i class="fas ${m.icon}"></i> ${m.label}</a>`;
+  });
+  html+='</div>';
+  document.getElementById('sidebarMenu').innerHTML=html;
+}
+
+function updateHeader(){
+  document.getElementById('headerName').textContent=currentUser.nome;
+  document.getElementById('headerRole').textContent=PERFIS[currentUser.perfil];
+  document.getElementById('headerAvatar').src=currentUser.foto||defaultAvatar();
+  document.getElementById('breadcrumb').textContent=currentSchool?currentSchool.info.nome:'Administração do Sistema';
+  checkSync();
+}
+
+// ============ NAVIGATION ============
+function navigateTo(page){
+  currentPage=page;
+  buildSidebar();
+  if(window.innerWidth<=768)document.getElementById('sidebar').classList.remove('mobile-open');
+
+  const routes={
+    adminDashboard:renderAdminDashboard,
+    escolas:renderEscolas,
+    directores:renderDirectores,
+    adminBackup:renderAdminBackup,
+    adminRelatorios:renderAdminRelatorios,
+    dashboard:renderDashboard,
+    anoLetivo:renderAnoLetivo,
+    trimestres:renderTrimestres,
+    users:renderUsers,
+    classes:renderClasses,
+    turmas:renderTurmas,
+    turnos:renderTurnos,
+    disciplinas:renderDisciplinas,
+    professores:renderProfessores,
+    alunos:renderAlunos,
+    matriculas:renderMatriculas,
+    notas:renderNotas,
+    frequencia:renderFrequencia,
+    documentos:renderDocumentos,
+    mensagens:renderMensagens,
+    comunicados:renderComunicados,
+    relatorios:renderRelatorios,
+    backup:renderBackup,
+    perfil:renderPerfil
+  };
+
+  const fn=routes[page]||renderDashboard;
+  fn();
+}
+
+// ============ ADMIN DASHBOARD ============
+function renderAdminDashboard(){
+  const totalSchools=SYSTEM.schools.length;
+  const totalStudents=SYSTEM.schools.reduce((a,s)=>a+s.students.length,0);
+  const totalUsers=SYSTEM.schools.reduce((a,s)=>a+s.users.length,0)+1;
+
+  let html=`
+  <div style="margin-bottom:24px">
+    <h1 style="font-size:24px;font-weight:700;color:#1e293b">Painel do Administrador</h1>
+    <p style="color:#64748b">Gestão centralizada de todas as escolas</p>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin-bottom:24px">
+    <div class="stat-card" style="--c1:#3b82f6;--c2:#1d4ed8">
+      <div style="font-size:32px;font-weight:800">${totalSchools}</div>
+      <div style="opacity:.9">Escolas Cadastradas</div>
+      <i class="fas fa-school" style="position:absolute;right:20px;top:20px;font-size:40px;opacity:.2"></i>
+    </div>
+    <div class="stat-card" style="--c1:#10b981;--c2:#059669">
+      <div style="font-size:32px;font-weight:800">${totalStudents}</div>
+      <div style="opacity:.9">Total de Alunos</div>
+      <i class="fas fa-user-graduate" style="position:absolute;right:20px;top:20px;font-size:40px;opacity:.2"></i>
+    </div>
+    <div class="stat-card" style="--c1:#f59e0b;--c2:#d97706">
+      <div style="font-size:32px;font-weight:800">${totalUsers}</div>
+      <div style="opacity:.9">Total de Utilizadores</div>
+      <i class="fas fa-users" style="position:absolute;right:20px;top:20px;font-size:40px;opacity:.2"></i>
+    </div>
+  </div>
+  <div class="card">
+    <h3 style="font-weight:700;margin-bottom:16px"><i class="fas fa-school" style="color:var(--primary)"></i> Escolas Registadas</h3>
+    <div class="table-container"><table class="data-table">
+      <thead><tr><th>Nome da Escola</th><th>Província</th><th>Director</th><th>Alunos</th><th>Acções</th></tr></thead>
+      <tbody>`;
+
+  if(SYSTEM.schools.length===0){
+    html+='<tr><td colspan="5" style="text-align:center;color:#9ca3af;padding:40px">Nenhuma escola cadastrada</td></tr>';
+  }
+  SYSTEM.schools.forEach(s=>{
+    const director=s.users.find(u=>u.perfil==='director_geral');
+    html+=`<tr>
+      <td><strong>${s.info.nome}</strong></td>
+      <td>${s.info.provincia||'-'}</td>
+      <td>${director?director.nome:'Não definido'}</td>
+      <td><span class="badge badge-blue">${s.students.length}</span></td>
+      <td>
+        <button class="btn btn-outline btn-sm" onclick="viewSchool('${s.id}')"><i class="fas fa-eye"></i></button>
+        <button class="btn btn-outline btn-sm" onclick="editSchool('${s.id}')"><i class="fas fa-edit"></i></button>
+      </td>
+    </tr>`;
+  });
+
+  html+=`</tbody></table></div></div>`;
+  document.getElementById('pageContent').innerHTML=html;
+}
+
+// ============ ESCOLAS ============
+function renderEscolas(){
+  let html=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
+    <div><h2 style="font-size:22px;font-weight:700">Escolas</h2><p style="color:#64748b">Gestão das escolas do sistema</p></div>
+    <button class="btn btn-primary" onclick="modalEscola()"><i class="fas fa-plus"></i> Nova Escola</button>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:20px">`;
+
+  SYSTEM.schools.forEach(s=>{
+    const director=s.users.find(u=>u.perfil==='director_geral');
+    html+=`<div class="card">
+      <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px">
+        <div style="width:60px;height:60px;background:linear-gradient(135deg,#3b82f6,#1d4ed8);border-radius:12px;display:flex;align-items:center;justify-content:center">
+          <i class="fas fa-school" style="color:#fff;font-size:24px"></i>
+        </div>
+        <div>
+          <h3 style="font-weight:700">${s.info.nome}</h3>
+          <p style="font-size:13px;color:#6b7280">${s.info.provincia||''} ${s.info.municipio?'- '+s.info.municipio:''}</p>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;text-align:center;margin-bottom:16px">
+        <div><div style="font-weight:700;font-size:20px">${s.students.length}</div><div style="font-size:12px;color:#9ca3af">Alunos</div></div>
+        <div><div style="font-weight:700;font-size:20px">${s.users.filter(u=>u.perfil==='professor').length}</div><div style="font-size:12px;color:#9ca3af">Professores</div></div>
+        <div><div style="font-weight:700;font-size:20px">${s.turmas.length}</div><div style="font-size:12px;color:#9ca3af">Turmas</div></div>
+      </div>
+      <div style="padding-top:16px;border-top:1px solid #f1f5f9">
+        <p style="font-size:13px"><strong>Director:</strong> ${director?director.nome:'<span style="color:#f59e0b">Não definido</span>'}</p>
+        <p style="font-size:13px"><strong>Telefone:</strong> ${s.info.telefone||'-'}</p>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:16px">
+        <button class="btn btn-outline btn-sm" onclick="viewSchool('${s.id}')"><i class="fas fa-eye"></i> Ver</button>
+        <button class="btn btn-outline btn-sm" onclick="editSchool('${s.id}')"><i class="fas fa-edit"></i> Editar</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteSchool('${s.id}')"><i class="fas fa-trash"></i></button>
+      </div>
+    </div>`;
+  });
+
+  if(SYSTEM.schools.length===0){
+    html+='<div class="card" style="grid-column:span 3;text-align:center;padding:60px"><i class="fas fa-school" style="font-size:48px;color:#d1d5db"></i><p style="color:#9ca3af;margin-top:12px">Nenhuma escola cadastrada</p></div>';
+  }
+  html+='</div>';
+  document.getElementById('pageContent').innerHTML=html;
+}
+
+function modalEscola(editId){
+  const s=editId?SYSTEM.schools.find(x=>x.id===editId):null;
+  openModal(`<div class="modal-header"><h3>${s?'Editar':'Nova'} Escola</h3><button onclick="closeModal()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div>
+  <div class="modal-body">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group" style="grid-column:span 2"><label>Nome da Escola *</label><input class="form-input" id="meNome" value="${s?.info.nome||''}"></div>
+      <div class="form-group"><label>Sigla</label><input class="form-input" id="meSigla" value="${s?.info.sigla||''}"></div>
+      <div class="form-group"><label>Nº de Registo</label><input class="form-input" id="meRegisto" value="${s?.info.numRegisto||''}"></div>
+      <div class="form-group"><label>Província *</label><select class="form-input" id="meProvincia"><option value="">Selecione</option>${PROVINCIAS.map(p=>`<option ${s?.info.provincia===p?'selected':''}>${p}</option>`).join('')}</select></div>
+      <div class="form-group"><label>Município</label><input class="form-input" id="meMunicipio" value="${s?.info.municipio||''}"></div>
+      <div class="form-group"><label>Comuna</label><input class="form-input" id="meComuna" value="${s?.info.comuna||''}"></div>
+      <div class="form-group"><label>Endereço</label><input class="form-input" id="meEndereco" value="${s?.info.endereco||''}"></div>
+      <div class="form-group"><label>Telefone</label><input class="form-input" id="meTelefone" value="${s?.info.telefone||''}"></div>
+      <div class="form-group"><label>Email</label><input class="form-input" id="meEmail" value="${s?.info.email||''}"></div>
+      <div class="form-group"><label>Tipo de Ensino</label><select class="form-input" id="meTipo"><option ${s?.info.tipoEnsino==='Público'?'selected':''}>Público</option><option ${s?.info.tipoEnsino==='Privado'?'selected':''}>Privado</option><option ${s?.info.tipoEnsino==='Comparticipado'?'selected':''}>Comparticipado</option></select></div>
+      <div class="form-group"><label>Níveis de Ensino</label><input class="form-input" id="meNiveis" value="${s?.info.niveisEnsino||''}" placeholder="Ex: Primário, I Ciclo, II Ciclo"></div>
+    </div>
+    <button class="btn btn-primary" style="width:100%;margin-top:16px" onclick="salvarEscola('${editId||''}')"><i class="fas fa-save"></i> Salvar Escola</button>
+  </div>`);
+}
+
+function editSchool(id){modalEscola(id);}
+
+function salvarEscola(editId){
+  const info={
+    nome:document.getElementById('meNome').value.trim(),
+    sigla:document.getElementById('meSigla').value.trim(),
+    numRegisto:document.getElementById('meRegisto').value.trim(),
+    provincia:document.getElementById('meProvincia').value,
+    municipio:document.getElementById('meMunicipio').value.trim(),
+    comuna:document.getElementById('meComuna').value.trim(),
+    endereco:document.getElementById('meEndereco').value.trim(),
+    telefone:document.getElementById('meTelefone').value.trim(),
+    email:document.getElementById('meEmail').value.trim(),
+    tipoEnsino:document.getElementById('meTipo').value,
+    niveisEnsino:document.getElementById('meNiveis').value.trim()
+  };
+
+  if(!info.nome||!info.provincia)return showToast('Preencha os campos obrigatórios!','error');
+
+  if(editId){
+    const s=SYSTEM.schools.find(x=>x.id===editId);
+    if(s)s.info=info;
+  }else{
+    SYSTEM.schools.push(createSchoolData(info));
+  }
+  saveSystem();syncToFirebase();closeModal();
+  showToast('Escola salva!','success');
+  renderEscolas();
+}
+
+function deleteSchool(id){
+  if(!confirm('Apagar esta escola e TODOS os seus dados?'))return;
+  SYSTEM.schools=SYSTEM.schools.filter(s=>s.id!==id);
+  saveSystem();syncToFirebase();
+  showToast('Escola apagada!','info');
+  renderEscolas();
+}
+
+function viewSchool(id){
+  const s=SYSTEM.schools.find(x=>x.id===id);
+  if(!s)return;
+  const director=s.users.find(u=>u.perfil==='director_geral');
+  openModal(`<div class="modal-header"><h3>${s.info.nome}</h3><button onclick="closeModal()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div>
+  <div class="modal-body">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div class="card">
+        <h4 style="margin-bottom:12px;color:var(--primary)"><i class="fas fa-info-circle"></i> Informações</h4>
+        <p><strong>Nome:</strong> ${s.info.nome}</p>
+        <p><strong>Sigla:</strong> ${s.info.sigla||'-'}</p>
+        <p><strong>Nº Registo:</strong> ${s.info.numRegisto||'-'}</p>
+        <p><strong>Província:</strong> ${s.info.provincia||'-'}</p>
+        <p><strong>Município:</strong> ${s.info.municipio||'-'}</p>
+        <p><strong>Tipo:</strong> ${s.info.tipoEnsino||'-'}</p>
+        <p><strong>Telefone:</strong> ${s.info.telefone||'-'}</p>
+        <p><strong>Email:</strong> ${s.info.email||'-'}</p>
+      </div>
+      <div class="card">
+        <h4 style="margin-bottom:12px;color:var(--secondary)"><i class="fas fa-chart-pie"></i> Estatísticas</h4>
+        <p><strong>Alunos:</strong> ${s.students.length}</p>
+        <p><strong>Professores:</strong> ${s.users.filter(u=>u.perfil==='professor').length}</p>
+        <p><strong>Funcionários:</strong> ${s.users.length}</p>
+        <p><strong>Turmas:</strong> ${s.turmas.length}</p>
+        <p><strong>Classes:</strong> ${s.classes.length}</p>
+        <p><strong>Disciplinas:</strong> ${s.disciplinas.length}</p>
+      </div>
+    </div>
+    ${director?`<div class="card" style="margin-top:16px">
+      <h4 style="margin-bottom:12px"><i class="fas fa-user-tie"></i> Director Geral</h4>
+      <div style="display:flex;align-items:center;gap:16px">
+        <img class="avatar avatar-lg" src="${director.foto||defaultAvatar()}">
+        <div>
+          <h3>${director.nome}</h3>
+          <p style="color:#6b7280">${director.telefone||'-'} | ${director.email||'-'}</p>
+        </div>
+      </div>
+    </div>`:'<div class="card" style="margin-top:16px;text-align:center;padding:24px;background:#fef3c7"><p style="color:#92400e"><i class="fas fa-exclamation-triangle"></i> Esta escola não tem Director cadastrado</p><button class="btn btn-warning" style="margin-top:12px" onclick="closeModal();modalDirector(null,\'${s.id}\')">Cadastrar Director</button></div>'}
+  </div>`);
+}
+
+// ============ DIRECTORES ============
+function renderDirectores(){
+  let html=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
+    <div><h2 style="font-size:22px;font-weight:700">Directores de Escolas</h2><p style="color:#64748b">Cadastro e gestão dos directores gerais</p></div>
+    <button class="btn btn-primary" onclick="modalDirector()"><i class="fas fa-plus"></i> Novo Director</button>
+  </div>
+  <div class="card"><div class="table-container"><table class="data-table">
+    <thead><tr><th>Foto</th><th>Nome</th><th>Escola</th><th>BI</th><th>Telefone</th><th>Estado</th><th>Acções</th></tr></thead><tbody>`;
+
+  SYSTEM.schools.forEach(s=>{
+    const dir=s.users.find(u=>u.perfil==='director_geral');
+    if(dir){
+      html+=`<tr>
+        <td><img class="avatar" src="${dir.foto||defaultAvatar()}"></td>
+        <td><strong>${dir.nome}</strong><br><small style="color:#6b7280">${dir.username}</small></td>
+        <td>${s.info.nome}</td>
+        <td>${dir.bi||'-'}</td>
+        <td>${dir.telefone||'-'}</td>
+        <td>${dir.ativo?'<span class="badge badge-green">Activo</span>':'<span class="badge badge-red">Inactivo</span>'}</td>
+        <td>
+          <button class="btn btn-outline btn-sm" onclick="viewDirector('${s.id}','${dir.id}')"><i class="fas fa-eye"></i></button>
+          <button class="btn btn-outline btn-sm" onclick="modalDirector('${dir.id}','${s.id}')"><i class="fas fa-edit"></i></button>
+        </td>
+      </tr>`;
+    }
+  });
+
+  const schoolsNoDirector=SYSTEM.schools.filter(s=>!s.users.find(u=>u.perfil==='director_geral'));
+  if(schoolsNoDirector.length>0){
+    html+=`<tr><td colspan="7" style="background:#fef3c7;padding:16px"><i class="fas fa-exclamation-triangle" style="color:#f59e0b"></i> <strong>${schoolsNoDirector.length} escola(s) sem director:</strong> ${schoolsNoDirector.map(s=>s.info.nome).join(', ')}</td></tr>`;
+  }
+
+  if(SYSTEM.schools.length===0){
+    html+='<tr><td colspan="7" style="text-align:center;color:#9ca3af;padding:40px">Cadastre uma escola primeiro</td></tr>';
+  }
+
+  html+=`</tbody></table></div></div>`;
+  document.getElementById('pageContent').innerHTML=html;
+}
+
+function modalDirector(editId,schoolId){
+  const school=schoolId?SYSTEM.schools.find(s=>s.id===schoolId):null;
+  const director=editId&&school?school.users.find(u=>u.id===editId):null;
+
+  const schoolOpts=SYSTEM.schools.map(s=>{
+    const hasDir=s.users.find(u=>u.perfil==='director_geral');
+    return `<option value="${s.id}" ${schoolId===s.id?'selected':''} ${hasDir&&!editId?'disabled':''}>${s.info.nome} ${hasDir&&!editId?'(Já tem director)':''}</option>`;
+  }).join('');
+
+  const pid='dirPhoto_'+Date.now(),pvid='dirPreview_'+Date.now(),plid='dirPlaceholder_'+Date.now();
+
+  openModal(`<div class="modal-header"><h3>${director?'Editar':'Cadastrar'} Director Geral</h3><button onclick="closeModal()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div>
+  <div class="modal-body">
+    <div class="photo-upload" onclick="document.getElementById('${pid}').click()">
+      <img id="${pvid}" src="${director?.foto||''}" style="display:${director?.foto?'block':'none'}">
+      <div id="${plid}" style="display:${director?.foto?'none':'block'}"><i class="fas fa-camera" style="font-size:24px;color:#9ca3af"></i></div>
+      <div class="overlay"><i class="fas fa-camera" style="color:#fff;font-size:20px"></i></div>
+    </div>
+    <input type="file" id="${pid}" accept="image/*" style="display:none" onchange="previewPhoto(this,'${pvid}','${plid}')">
+
+    <div class="form-group"><label>Escola *</label><select class="form-input" id="mdEscola" ${editId?'disabled':''}>${schoolOpts}</select></div>
+
+    <h4 style="margin:16px 0 12px;color:var(--primary)"><i class="fas fa-user"></i> Dados Pessoais Completos</h4>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label>Nome Completo *</label><input class="form-input" id="mdNome" value="${director?.nome||''}"></div>
+      <div class="form-group"><label>Nº do Bilhete de Identidade *</label><input class="form-input" id="mdBI" value="${director?.bi||''}"></div>
+      <div class="form-group"><label>Data de Nascimento *</label><input type="date" class="form-input" id="mdNasc" value="${director?.dataNascimento||''}"></div>
+      <div class="form-group"><label>Género *</label><select class="form-input" id="mdGenero"><option value="">Selecione</option><option ${director?.genero==='Masculino'?'selected':''}>Masculino</option><option ${director?.genero==='Feminino'?'selected':''}>Feminino</option></select></div>
+      <div class="form-group"><label>Estado Civil</label><select class="form-input" id="mdEstadoCivil"><option value="">Selecione</option><option ${director?.estadoCivil==='Solteiro(a)'?'selected':''}>Solteiro(a)</option><option ${director?.estadoCivil==='Casado(a)'?'selected':''}>Casado(a)</option><option ${director?.estadoCivil==='Divorciado(a)'?'selected':''}>Divorciado(a)</option><option ${director?.estadoCivil==='Viúvo(a)'?'selected':''}>Viúvo(a)</option><option ${director?.estadoCivil==='União de Facto'?'selected':''}>União de Facto</option></select></div>
+      <div class="form-group"><label>Naturalidade</label><input class="form-input" id="mdNaturalidade" value="${director?.naturalidade||''}"></div>
+      <div class="form-group"><label>Província de Origem *</label><select class="form-input" id="mdProvincia"><option value="">Selecione</option>${PROVINCIAS.map(p=>`<option ${director?.provincia===p?'selected':''}>${p}</option>`).join('')}</select></div>
+      <div class="form-group"><label>Município</label><input class="form-input" id="mdMunicipio" value="${director?.municipio||''}"></div>
+      <div class="form-group"><label>Comuna</label><input class="form-input" id="mdComuna" value="${director?.comuna||''}"></div>
+      <div class="form-group"><label>Bairro/Endereço Residencial</label><input class="form-input" id="mdEndereco" value="${director?.endereco||''}"></div>
+      <div class="form-group"><label>Telefone Principal *</label><input class="form-input" id="mdTelefone" value="${director?.telefone||''}" placeholder="+244"></div>
+      <div class="form-group"><label>Telefone Alternativo</label><input class="form-input" id="mdTelefone2" value="${director?.telefone2||''}"></div>
+      <div class="form-group"><label>Email *</label><input type="email" class="form-input" id="mdEmail" value="${director?.email||''}"></div>
+      <div class="form-group"><label>IBAN</label><input class="form-input" id="mdIBAN" value="${director?.iban||''}"></div>
+    </div>
+
+    <h4 style="margin:16px 0 12px;color:var(--secondary)"><i class="fas fa-graduation-cap"></i> Dados Profissionais</h4>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label>Habilitações Literárias *</label><select class="form-input" id="mdHabilitacoes"><option value="">Selecione</option><option ${director?.habilitacoes==='Ensino Médio'?'selected':''}>Ensino Médio</option><option ${director?.habilitacoes==='Bacharelato'?'selected':''}>Bacharelato</option><option ${director?.habilitacoes==='Licenciatura'?'selected':''}>Licenciatura</option><option ${director?.habilitacoes==='Mestrado'?'selected':''}>Mestrado</option><option ${director?.habilitacoes==='Doutoramento'?'selected':''}>Doutoramento</option></select></div>
+      <div class="form-group"><label>Área de Formação</label><input class="form-input" id="mdFormacao" value="${director?.areaFormacao||''}" placeholder="Ex: Ciências da Educação"></div>
+      <div class="form-group"><label>Nº de Agente *</label><input class="form-input" id="mdAgente" value="${director?.numAgente||''}"></div>
+      <div class="form-group"><label>Categoria Profissional</label><input class="form-input" id="mdCategoria" value="${director?.categoria||''}"></div>
+      <div class="form-group"><label>Classe Salarial</label><input class="form-input" id="mdClasseSalarial" value="${director?.classeSalarial||''}"></div>
+      <div class="form-group"><label>Data de Ingresso na Função Pública</label><input type="date" class="form-input" id="mdDataIngresso" value="${director?.dataIngresso||''}"></div>
+      <div class="form-group"><label>Anos de Serviço</label><input type="number" class="form-input" id="mdAnosServico" value="${director?.anosServico||''}"></div>
+      <div class="form-group"><label>Nº INSS</label><input class="form-input" id="mdINSS" value="${director?.numINSS||''}"></div>
+    </div>
+
+    <h4 style="margin:16px 0 12px;color:var(--accent)"><i class="fas fa-key"></i> Credenciais de Acesso</h4>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label>Nome de Utilizador *</label><input class="form-input" id="mdUsername" value="${director?.username||''}"></div>
+      <div class="form-group"><label>Senha ${director?'(deixe vazio para manter)':'*'}</label><input type="password" class="form-input" id="mdSenha"></div>
+    </div>
+
+    <button class="btn btn-primary" style="width:100%;margin-top:16px" onclick="salvarDirector('${editId||''}','${schoolId||''}','${pvid}')"><i class="fas fa-save"></i> Salvar Director</button>
+  </div>`);
+}
+
+function salvarDirector(editId,schoolId,previewId){
+  const escolaId=document.getElementById('mdEscola').value||schoolId;
+  const school=SYSTEM.schools.find(s=>s.id===escolaId);
+  if(!school)return showToast('Selecione uma escola!','error');
+
+  const data={
+    nome:document.getElementById('mdNome').value.trim(),
+    bi:document.getElementById('mdBI').value.trim(),
+    dataNascimento:document.getElementById('mdNasc').value,
+    genero:document.getElementById('mdGenero').value,
+    estadoCivil:document.getElementById('mdEstadoCivil').value,
+    naturalidade:document.getElementById('mdNaturalidade').value,
+    provincia:document.getElementById('mdProvincia').value,
+    municipio:document.getElementById('mdMunicipio').value,
+    comuna:document.getElementById('mdComuna').value,
+    endereco:document.getElementById('mdEndereco').value,
+    telefone:document.getElementById('mdTelefone').value,
+    telefone2:document.getElementById('mdTelefone2').value,
+    email:document.getElementById('mdEmail').value,
+    iban:document.getElementById('mdIBAN').value,
+    habilitacoes:document.getElementById('mdHabilitacoes').value,
+    areaFormacao:document.getElementById('mdFormacao').value,
+    numAgente:document.getElementById('mdAgente').value,
+    categoria:document.getElementById('mdCategoria').value,
+    classeSalarial:document.getElementById('mdClasseSalarial').value,
+    dataIngresso:document.getElementById('mdDataIngresso').value,
+    anosServico:document.getElementById('mdAnosServico').value,
+    numINSS:document.getElementById('mdINSS').value,
+    username:document.getElementById('mdUsername').value.trim(),
+    perfil:'director_geral'
+  };
+  const senha=document.getElementById('mdSenha').value;
+  const foto=getPhotoData(previewId);
+
+  if(!data.nome||!data.bi||!data.username)return showToast('Preencha os campos obrigatórios!','error');
+  if(!editId&&!senha)return showToast('Digite a senha!','error');
+
+  // Check username unique
+  let exists=false;
+  SYSTEM.schools.forEach(s=>{
+    if(s.users.find(u=>u.username===data.username&&u.id!==editId))exists=true;
+  });
+  if(exists)return showToast('Username já existe!','error');
+
+  if(editId){
+    const u=school.users.find(x=>x.id===editId);
+    if(u){
+      Object.assign(u,data);
+      if(foto)u.foto=foto;
+      if(senha)u.senha=btoa(senha);
+    }
+  }else{
+    school.users.push({
+      id:generateId(),...data,
+      senha:btoa(senha),foto,ativo:true,dataCriacao:new Date().toISOString()
+    });
+  }
+
+  saveSystem();syncToFirebase();closeModal();
+  showToast('Director salvo!','success');
+  renderDirectores();
+}
+
+function viewDirector(schoolId,dirId){
+  const school=SYSTEM.schools.find(s=>s.id===schoolId);
+  const dir=school?.users.find(u=>u.id===dirId);
+  if(!dir)return;
+
+  openModal(`<div class="modal-header"><h3>Perfil do Director</h3><button onclick="closeModal()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div>
+  <div class="modal-body">
+    <div style="text-align:center;margin-bottom:24px">
+      <img class="avatar avatar-xl" src="${dir.foto||defaultAvatar()}">
+      <h2 style="margin-top:12px">${dir.nome}</h2>
+      <span class="badge badge-purple">${PERFIS[dir.perfil]}</span>
+      <p style="color:#6b7280;margin-top:4px">${school.info.nome}</p>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <p><strong>BI:</strong> ${dir.bi||'-'}</p>
+      <p><strong>Data Nasc.:</strong> ${formatDate(dir.dataNascimento)} (${calcAge(dir.dataNascimento)} anos)</p>
+      <p><strong>Género:</strong> ${dir.genero||'-'}</p>
+      <p><strong>Estado Civil:</strong> ${dir.estadoCivil||'-'}</p>
+      <p><strong>Naturalidade:</strong> ${dir.naturalidade||'-'}</p>
+      <p><strong>Província:</strong> ${dir.provincia||'-'}</p>
+      <p><strong>Município:</strong> ${dir.municipio||'-'}</p>
+      <p><strong>Telefone:</strong> ${dir.telefone||'-'}</p>
+      <p><strong>Email:</strong> ${dir.email||'-'}</p>
+      <p><strong>Habilitações:</strong> ${dir.habilitacoes||'-'}</p>
+      <p><strong>Nº Agente:</strong> ${dir.numAgente||'-'}</p>
+      <p><strong>Categoria:</strong> ${dir.categoria||'-'}</p>
+      <p><strong>Anos de Serviço:</strong> ${dir.anosServico||'-'}</p>
+      <p><strong>Nº INSS:</strong> ${dir.numINSS||'-'}</p>
+    </div>
+  </div>`);
+}
+
+// ============ ADMIN BACKUP ============
+function renderAdminBackup(){
+  let html=`<div style="margin-bottom:24px">
+    <h2 style="font-size:22px;font-weight:700">Backup & Sincronização</h2>
+    <p style="color:#64748b">Gestão centralizada de backups do sistema</p>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px">
+    <div class="card" style="text-align:center">
+      <div style="width:64px;height:64px;background:#dbeafe;border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px">
+        <i class="fas fa-cloud-upload-alt" style="font-size:28px;color:#2563eb"></i>
+      </div>
+      <h3>Sincronizar com Firebase</h3>
+      <p style="color:#6b7280;font-size:13px;margin:8px 0">Enviar todos os dados para a nuvem</p>
+      <button class="btn btn-primary" onclick="syncToFirebase()"><i class="fas fa-upload"></i> Sincronizar</button>
+    </div>
+    <div class="card" style="text-align:center">
+      <div style="width:64px;height:64px;background:#d1fae5;border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px">
+        <i class="fas fa-cloud-download-alt" style="font-size:28px;color:#059669"></i>
+      </div>
+      <h3>Restaurar da Nuvem</h3>
+      <p style="color:#6b7280;font-size:13px;margin:8px 0">Baixar dados do Firebase</p>
+      <button class="btn btn-success" onclick="syncFromFirebase()"><i class="fas fa-download"></i> Restaurar</button>
+    </div>
+    <div class="card" style="text-align:center">
+      <div style="width:64px;height:64px;background:#fef3c7;border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px">
+        <i class="fas fa-file-excel" style="font-size:28px;color:#d97706"></i>
+      </div>
+      <h3>Backup Geral XLS</h3>
+      <p style="color:#6b7280;font-size:13px;margin:8px 0">Exportar todas escolas em Excel</p>
+      <button class="btn btn-warning" onclick="backupGeralXLS()"><i class="fas fa-download"></i> Exportar</button>
+    </div>
+    <div class="card" style="text-align:center">
+      <div style="width:64px;height:64px;background:#ede9fe;border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px">
+        <i class="fas fa-file-archive" style="font-size:28px;color:#7c3aed"></i>
+      </div>
+      <h3>Backup JSON Completo</h3>
+      <p style="color:#6b7280;font-size:13px;margin:8px 0">Exportar todo o sistema</p>
+      <button class="btn btn-outline" onclick="backupJSON()"><i class="fas fa-download"></i> Exportar</button>
+    </div>
+  </div>`;
+  document.getElementById('pageContent').innerHTML=html;
+}
+
+function backupGeralXLS(){
+  const wb=XLSX.utils.book_new();
+  // Schools sheet
+  const schoolsData=SYSTEM.schools.map(s=>({
+    'Nome':s.info.nome,'Província':s.info.provincia,'Município':s.info.municipio,
+    'Tipo':s.info.tipoEnsino,'Telefone':s.info.telefone,'Email':s.info.email,
+    'Alunos':s.students.length,'Professores':s.users.filter(u=>u.perfil==='professor').length
+  }));
+  if(schoolsData.length>0)XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(schoolsData),'Escolas');
+
+  // All students
+  const allStudents=[];
+  SYSTEM.schools.forEach(s=>{
+    s.students.forEach(st=>{
+      allStudents.push({
+        'Escola':s.info.nome,'Nome':st.nome,'Classe':st.classe||'','Género':st.genero||'',
+        'Data Nasc.':formatDate(st.dataNascimento),'BI':st.bi||'','Pai':st.nomePai||'','Mãe':st.nomeMae||''
+      });
+    });
+  });
+  if(allStudents.length>0)XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(allStudents),'Todos Alunos');
+
+  XLSX.writeFile(wb,`backup_sistema_${new Date().toISOString().split('T')[0]}.xlsx`);
+  showToast('Backup XLS gerado!','success');
+}
+
+function backupJSON(){
+  const json=JSON.stringify(SYSTEM,null,2);
+  const blob=new Blob([json],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;a.download=`backup_sistema_${new Date().toISOString().split('T')[0]}.json`;
+  a.click();URL.revokeObjectURL(url);
+  showToast('Backup JSON exportado!','success');
+}
+
+// ============ ADMIN RELATÓRIOS ============
+function renderAdminRelatorios(){
+  const totalSchools=SYSTEM.schools.length;
+  const totalStudents=SYSTEM.schools.reduce((a,s)=>a+s.students.length,0);
+  const totalProfs=SYSTEM.schools.reduce((a,s)=>a+s.users.filter(u=>u.perfil==='professor').length,0);
+
+  let html=`<div style="margin-bottom:24px">
+    <h2 style="font-size:22px;font-weight:700">Relatórios Gerais</h2>
+    <p style="color:#64748b">Visão geral de todas as escolas</p>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px">
+    <div class="stat-card" style="--c1:#3b82f6;--c2:#1d4ed8"><div style="font-size:28px;font-weight:800">${totalSchools}</div><div>Escolas</div></div>
+    <div class="stat-card" style="--c1:#10b981;--c2:#059669"><div style="font-size:28px;font-weight:800">${totalStudents}</div><div>Alunos</div></div>
+    <div class="stat-card" style="--c1:#f59e0b;--c2:#d97706"><div style="font-size:28px;font-weight:800">${totalProfs}</div><div>Professores</div></div>
+  </div>
+  <div class="card">
+    <h3 style="margin-bottom:16px">Exportar Relatórios</h3>
+    <div style="display:flex;gap:12px;flex-wrap:wrap">
+      <button class="btn btn-success" onclick="exportarRelatorioAdminXLS()"><i class="fas fa-file-excel"></i> Relatório Geral (XLS)</button>
+      <button class="btn btn-danger" onclick="exportarRelatorioAdminPDF()"><i class="fas fa-file-pdf"></i> Relatório Geral (PDF)</button>
+    </div>
+  </div>`;
+  document.getElementById('pageContent').innerHTML=html;
+}
+
+function exportarRelatorioAdminXLS(){
+  const wb=XLSX.utils.book_new();
+  const data=SYSTEM.schools.map(s=>({
+    'Escola':s.info.nome,'Província':s.info.provincia,'Alunos':s.students.length,
+    'Professores':s.users.filter(u=>u.perfil==='professor').length,'Turmas':s.turmas.length,
+    'Classes':s.classes.length
+  }));
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(data),'Resumo');
+  XLSX.writeFile(wb,'relatorio_geral.xlsx');
+  showToast('Relatório XLS exportado!','success');
+}
+
+function exportarRelatorioAdminPDF(){
+  const{jsPDF}=window.jspdf;
+  const doc=new jsPDF();
+  doc.setFontSize(18);doc.setFont(undefined,'bold');
+  doc.text('SISTEMA DE GESTÃO ESCOLAR - ANGOLA',105,20,{align:'center'});
+  doc.setFontSize(14);doc.text('RELATÓRIO GERAL',105,30,{align:'center'});
+  doc.line(20,34,190,34);
+
+  let y=45;
+  doc.setFontSize(11);doc.setFont(undefined,'normal');
+  doc.text(`Data: ${new Date().toLocaleDateString('pt-AO')}`,20,y);y+=10;
+  doc.text(`Total de Escolas: ${SYSTEM.schools.length}`,20,y);y+=7;
+  doc.text(`Total de Alunos: ${SYSTEM.schools.reduce((a,s)=>a+s.students.length,0)}`,20,y);y+=7;
+  doc.text(`Total de Professores: ${SYSTEM.schools.reduce((a,s)=>a+s.users.filter(u=>u.perfil==='professor').length,0)}`,20,y);y+=15;
+
+  if(SYSTEM.schools.length>0){
+    const tableData=SYSTEM.schools.map(s=>[s.info.nome,s.info.provincia||'-',s.students.length,s.users.filter(u=>u.perfil==='professor').length,s.turmas.length]);
+    doc.autoTable({startY:y,head:[['Escola','Província','Alunos','Professores','Turmas']],body:tableData,margin:{left:20,right:20},styles:{fontSize:9},headStyles:{fillColor:[30,64,175]}});
+  }
+
+  doc.save('relatorio_geral.pdf');
+  showToast('Relatório PDF gerado!','success');
+}
+
+// ============ SCHOOL DASHBOARD ============
+function renderDashboard(){
+  if(!currentSchool)return;
+  const s=currentSchool;
+  const anoAtivo=s.anoLetivo.find(a=>a.ativo);
+
+  let html=`<div style="margin-bottom:24px">
+    <h1 style="font-size:24px;font-weight:700">${s.info.nome}</h1>
+    <p style="color:#64748b">${PERFIS[currentUser.perfil]} ${anoAtivo?'| Ano Lectivo '+anoAtivo.ano:''}</p>
+    ${anoAtivo?'<span class="badge badge-green">Ano Lectivo Activo</span>':'<span class="badge badge-red">Sem ano lectivo activo</span>'}
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px">
+    <div class="stat-card" style="--c1:#3b82f6;--c2:#1d4ed8"><div style="font-size:28px;font-weight:800">${s.students.length}</div><div>Alunos</div></div>
+    <div class="stat-card" style="--c1:#10b981;--c2:#059669"><div style="font-size:28px;font-weight:800">${s.users.filter(u=>u.perfil==='professor').length}</div><div>Professores</div></div>
+    <div class="stat-card" style="--c1:#f59e0b;--c2:#d97706"><div style="font-size:28px;font-weight:800">${s.turmas.length}</div><div>Turmas</div></div>
+    <div class="stat-card" style="--c1:#8b5cf6;--c2:#7c3aed"><div style="font-size:28px;font-weight:800">${s.matriculas.filter(m=>m.anoLetivo===(anoAtivo?.ano||'')).length}</div><div>Matrículas</div></div>
+  </div>`;
+  document.getElementById('pageContent').innerHTML=html;
+}
+
+// ============ ANO LETIVO ============
+function renderAnoLetivo(){
+  if(!currentSchool)return;
+  const anos=currentSchool.anoLetivo||[];
+  let html=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
+    <div><h2 style="font-size:22px;font-weight:700">Ano Lectivo</h2></div>
+    <button class="btn btn-primary" onclick="modalAnoLetivo()"><i class="fas fa-plus"></i> Novo</button>
+  </div>
+  <div class="card"><div class="table-container"><table class="data-table">
+    <thead><tr><th>Ano</th><th>Início</th><th>Fim</th><th>Estado</th><th>Acções</th></tr></thead><tbody>`;
+  anos.forEach(a=>{
+    html+=`<tr><td><strong>${a.ano}</strong></td><td>${formatDate(a.inicio)}</td><td>${formatDate(a.fim)}</td>
+    <td>${a.ativo?'<span class="badge badge-green">Activo</span>':'<span class="badge badge-red">Fechado</span>'}</td>
+    <td>${a.ativo?`<button class="btn btn-danger btn-sm" onclick="toggleAno('${a.id}',false)"><i class="fas fa-lock"></i></button>`:`<button class="btn btn-success btn-sm" onclick="toggleAno('${a.id}',true)"><i class="fas fa-lock-open"></i></button>`}</td></tr>`;
+  });
+  if(anos.length===0)html+='<tr><td colspan="5" style="text-align:center;color:#9ca3af;padding:40px">Nenhum ano cadastrado</td></tr>';
+  html+=`</tbody></table></div></div>`;
+  document.getElementById('pageContent').innerHTML=html;
+}
+
+function modalAnoLetivo(){
+  const y=new Date().getFullYear();
+  openModal(`<div class="modal-header"><h3>Novo Ano Lectivo</h3><button onclick="closeModal()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div>
+  <div class="modal-body">
+    <div class="form-group"><label>Ano *</label><input class="form-input" id="maAno" value="${y}"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label>Início</label><input type="date" class="form-input" id="maInicio"></div>
+      <div class="form-group"><label>Fim</label><input type="date" class="form-input" id="maFim"></div>
+    </div>
+    <button class="btn btn-primary" style="width:100%" onclick="salvarAnoLetivo()"><i class="fas fa-save"></i> Salvar</button>
+  </div>`);
+}
+
+function salvarAnoLetivo(){
+  const ano=document.getElementById('maAno').value;
+  const inicio=document.getElementById('maInicio').value;
+  const fim=document.getElementById('maFim').value;
+  if(!ano)return showToast('Digite o ano!','error');
+  currentSchool.anoLetivo.push({id:generateId(),ano,inicio,fim,ativo:true});
+  saveSystem();syncToFirebase();closeModal();showToast('Ano criado!','success');renderAnoLetivo();
+}
+
+function toggleAno(id,state){
+  if(state)currentSchool.anoLetivo.forEach(a=>a.ativo=false);
+  const a=currentSchool.anoLetivo.find(x=>x.id===id);
+  if(a)a.ativo=state;
+  saveSystem();syncToFirebase();renderAnoLetivo();
+}
+
+// ============ TRIMESTRES ============
+function renderTrimestres(){
+  if(!currentSchool)return;
+  const tris=currentSchool.trimestres||[];
+  let html=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
+    <div><h2 style="font-size:22px;font-weight:700">Trimestres</h2></div>
+    <button class="btn btn-primary" onclick="modalTrimestre()"><i class="fas fa-plus"></i> Novo</button>
+  </div>
+  <div class="card"><div class="table-container"><table class="data-table">
+    <thead><tr><th>Trimestre</th><th>Ano</th><th>Início</th><th>Fim</th><th>Estado</th><th>Acções</th></tr></thead><tbody>`;
+  tris.forEach(t=>{
+    html+=`<tr><td><strong>${t.nome}</strong></td><td>${t.anoLetivo}</td><td>${formatDate(t.inicio)}</td><td>${formatDate(t.fim)}</td>
+    <td>${t.ativo?'<span class="badge badge-green">Activo</span>':'<span class="badge badge-red">Fechado</span>'}</td>
+    <td>${t.ativo?`<button class="btn btn-danger btn-sm" onclick="toggleTri('${t.id}',false)"><i class="fas fa-lock"></i></button>`:`<button class="btn btn-success btn-sm" onclick="toggleTri('${t.id}',true)"><i class="fas fa-lock-open"></i></button>`}</td></tr>`;
+  });
+  if(tris.length===0)html+='<tr><td colspan="6" style="text-align:center;color:#9ca3af;padding:40px">Nenhum trimestre</td></tr>';
+  html+=`</tbody></table></div></div>`;
+  document.getElementById('pageContent').innerHTML=html;
+}
+
+function modalTrimestre(){
+  const anosOpts=currentSchool.anoLetivo.map(a=>`<option ${a.ativo?'selected':''}>${a.ano}</option>`).join('');
+  openModal(`<div class="modal-header"><h3>Novo Trimestre</h3><button onclick="closeModal()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div>
+  <div class="modal-body">
+    <div class="form-group"><label>Trimestre</label><select class="form-input" id="mtNome"><option>1º Trimestre</option><option>2º Trimestre</option><option>3º Trimestre</option></select></div>
+    <div class="form-group"><label>Ano Lectivo</label><select class="form-input" id="mtAno">${anosOpts}</select></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label>Início</label><input type="date" class="form-input" id="mtInicio"></div>
+      <div class="form-group"><label>Fim</label><input type="date" class="form-input" id="mtFim"></div>
+    </div>
+    <button class="btn btn-primary" style="width:100%" onclick="salvarTrimestre()"><i class="fas fa-save"></i> Salvar</button>
+  </div>`);
+}
+
+function salvarTrimestre(){
+  const nome=document.getElementById('mtNome').value;
+  const anoLetivo=document.getElementById('mtAno').value;
+  const inicio=document.getElementById('mtInicio').value;
+  const fim=document.getElementById('mtFim').value;
+  currentSchool.trimestres.push({id:generateId(),nome,anoLetivo,inicio,fim,ativo:true});
+  saveSystem();syncToFirebase();closeModal();showToast('Trimestre criado!','success');renderTrimestres();
+}
+
+function toggleTri(id,state){
+  const t=currentSchool.trimestres.find(x=>x.id===id);
+  if(t)t.ativo=state;
+  saveSystem();syncToFirebase();renderTrimestres();
+}
+
+// ============ CLASSES ============
+function renderClasses(){
+  if(!currentSchool)return;
+  let html=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
+    <div><h2 style="font-size:22px;font-weight:700">Classes</h2></div>
+    <button class="btn btn-primary" onclick="modalClasse()"><i class="fas fa-plus"></i> Nova</button>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px">`;
+  (currentSchool.classes||[]).forEach(c=>{
+    const numAl=currentSchool.students.filter(s=>s.classe===c.nome).length;
+    html+=`<div class="card" style="text-align:center">
+      <div style="width:50px;height:50px;background:var(--primary);border-radius:12px;display:flex;align-items:center;justify-content:center;margin:0 auto 12px;color:#fff;font-weight:700">${c.nome.charAt(0)}</div>
+      <h3>${c.nome}</h3>
+      <p style="color:#6b7280;font-size:13px">${numAl} alunos</p>
+      <button class="btn btn-danger btn-sm" style="margin-top:12px" onclick="deleteSchoolItem('classes','${c.id}')"><i class="fas fa-trash"></i></button>
+    </div>`;
+  });
+  if((currentSchool.classes||[]).length===0)html+='<div class="card" style="grid-column:span 3;text-align:center;padding:60px;color:#9ca3af">Nenhuma classe</div>';
+  html+='</div>';
+  document.getElementById('pageContent').innerHTML=html;
+}
+
+function modalClasse(){
+  openModal(`<div class="modal-header"><h3>Nova Classe</h3><button onclick="closeModal()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div>
+  <div class="modal-body">
+    <div class="form-group"><label>Classe</label><select class="form-input" id="mcNome">${CLASSES.map(c=>`<option>${c}</option>`).join('')}</select></div>
+    <div class="form-group"><label>Nível</label><select class="form-input" id="mcNivel"><option>Ensino Primário</option><option>I Ciclo</option><option>II Ciclo</option></select></div>
+    <button class="btn btn-primary" style="width:100%" onclick="salvarClasse()"><i class="fas fa-save"></i> Salvar</button>
+  </div>`);
+}
+
+function salvarClasse(){
+  const nome=document.getElementById('mcNome').value;
+  const nivel=document.getElementById('mcNivel').value;
+  currentSchool.classes.push({id:generateId(),nome,nivel});
+  saveSystem();syncToFirebase();closeModal();showToast('Classe criada!','success');renderClasses();
+}
+
+// ============ TURMAS ============
+function renderTurmas(){
+  if(!currentSchool)return;
+  let html=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
+    <div><h2 style="font-size:22px;font-weight:700">Turmas</h2></div>
+    <button class="btn btn-primary" onclick="modalTurma()"><i class="fas fa-plus"></i> Nova</button>
+  </div>
+  <div class="card"><div class="table-container"><table class="data-table">
+    <thead><tr><th>Turma</th><th>Classe</th><th>Turno</th><th>Sala</th><th>Alunos</th><th>Acções</th></tr></thead><tbody>`;
+  (currentSchool.turmas||[]).forEach(t=>{
+    const numAl=currentSchool.students.filter(s=>s.turmaId===t.id).length;
+    html+=`<tr><td><strong>${t.nome}</strong></td><td>${t.classe}</td><td>${t.turno||'-'}</td><td>${t.sala||'-'}</td>
+    <td><span class="badge badge-blue">${numAl}</span></td>
+    <td><button class="btn btn-danger btn-sm" onclick="deleteSchoolItem('turmas','${t.id}')"><i class="fas fa-trash"></i></button></td></tr>`;
+  });
+  if((currentSchool.turmas||[]).length===0)html+='<tr><td colspan="6" style="text-align:center;color:#9ca3af;padding:40px">Nenhuma turma</td></tr>';
+  html+=`</tbody></table></div></div>`;
+  document.getElementById('pageContent').innerHTML=html;
+}
+
+function modalTurma(){
+  const classesOpts=currentSchool.classes.map(c=>`<option>${c.nome}</option>`).join('');
+  const turnosOpts=(currentSchool.turnos||[]).map(t=>`<option>${t.nome}</option>`).join('');
+  openModal(`<div class="modal-header"><h3>Nova Turma</h3><button onclick="closeModal()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div>
+  <div class="modal-body">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label>Nome da Turma *</label><input class="form-input" id="mtuNome" placeholder="A, B, C..."></div>
+      <div class="form-group"><label>Classe *</label><select class="form-input" id="mtuClasse">${classesOpts}</select></div>
+      <div class="form-group"><label>Turno</label><select class="form-input" id="mtuTurno"><option value="">Selecione</option>${turnosOpts}</select></div>
+      <div class="form-group"><label>Sala</label><input class="form-input" id="mtuSala"></div>
+    </div>
+    <button class="btn btn-primary" style="width:100%" onclick="salvarTurma()"><i class="fas fa-save"></i> Salvar</button>
+  </div>`);
+}
+
+function salvarTurma(){
+  const nome=document.getElementById('mtuNome').value.trim();
+  const classe=document.getElementById('mtuClasse').value;
+  const turno=document.getElementById('mtuTurno').value;
+  const sala=document.getElementById('mtuSala').value;
+  if(!nome)return showToast('Digite o nome!','error');
+  currentSchool.turmas.push({id:generateId(),nome,classe,turno,sala});
+  saveSystem();syncToFirebase();closeModal();showToast('Turma criada!','success');renderTurmas();
+}
+
+// ============ TURNOS ============
+function renderTurnos(){
+  if(!currentSchool)return;
+  let html=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
+    <div><h2 style="font-size:22px;font-weight:700">Turnos</h2></div>
+    <button class="btn btn-primary" onclick="modalTurno()"><i class="fas fa-plus"></i> Novo</button>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:16px">`;
+  (currentSchool.turnos||[]).forEach(t=>{
+    html+=`<div class="card"><h3>${t.nome}</h3><p style="color:#6b7280">${t.horaInicio||''} - ${t.horaFim||''}</p>
+    <button class="btn btn-danger btn-sm" style="margin-top:12px" onclick="deleteSchoolItem('turnos','${t.id}')"><i class="fas fa-trash"></i></button></div>`;
+  });
+  if((currentSchool.turnos||[]).length===0)html+='<div class="card" style="grid-column:span 3;text-align:center;padding:60px;color:#9ca3af">Nenhum turno</div>';
+  html+='</div>';
+  document.getElementById('pageContent').innerHTML=html;
+}
+
+function modalTurno(){
+  openModal(`<div class="modal-header"><h3>Novo Turno</h3><button onclick="closeModal()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div>
+  <div class="modal-body">
+    <div class="form-group"><label>Nome *</label><input class="form-input" id="mtnNome" placeholder="Ex: Manhã"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label>Início</label><input type="time" class="form-input" id="mtnI"></div>
+      <div class="form-group"><label>Fim</label><input type="time" class="form-input" id="mtnF"></div>
+    </div>
+    <button class="btn btn-primary" style="width:100%" onclick="salvarTurno()"><i class="fas fa-save"></i> Salvar</button>
+  </div>`);
+}
+
+function salvarTurno(){
+  const nome=document.getElementById('mtnNome').value.trim();
+  const hi=document.getElementById('mtnI').value;
+  const hf=document.getElementById('mtnF').value;
+  if(!nome)return showToast('Digite o nome!','error');
+  currentSchool.turnos.push({id:generateId(),nome,horaInicio:hi,horaFim:hf});
+  saveSystem();syncToFirebase();closeModal();showToast('Turno criado!','success');renderTurnos();
+}
+
+// ============ DISCIPLINAS ============
+function renderDisciplinas(){
+  if(!currentSchool)return;
+  let html=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
+    <div><h2 style="font-size:22px;font-weight:700">Disciplinas</h2></div>
+    <button class="btn btn-primary" onclick="modalDisciplina()"><i class="fas fa-plus"></i> Nova</button>
+  </div>
+  <div class="card"><div class="table-container"><table class="data-table">
+    <thead><tr><th>Disciplina</th><th>Abreviatura</th><th>Classe</th><th>Acções</th></tr></thead><tbody>`;
+  (currentSchool.disciplinas||[]).forEach(d=>{
+    html+=`<tr><td><strong>${d.nome}</strong></td><td>${d.abrev||'-'}</td><td>${d.classe||'Todas'}</td>
+    <td><button class="btn btn-danger btn-sm" onclick="deleteSchoolItem('disciplinas','${d.id}')"><i class="fas fa-trash"></i></button></td></tr>`;
+  });
+  if((currentSchool.disciplinas||[]).length===0)html+='<tr><td colspan="4" style="text-align:center;color:#9ca3af;padding:40px">Nenhuma disciplina</td></tr>';
+  html+=`</tbody></table></div></div>`;
+  document.getElementById('pageContent').innerHTML=html;
+}
+
+function modalDisciplina(){
+  const classesOpts=currentSchool.classes.map(c=>`<option>${c.nome}</option>`).join('');
+  openModal(`<div class="modal-header"><h3>Nova Disciplina</h3><button onclick="closeModal()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div>
+  <div class="modal-body">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label>Nome *</label><input class="form-input" id="mdNome"></div>
+      <div class="form-group"><label>Abreviatura</label><input class="form-input" id="mdAbrev"></div>
+      <div class="form-group"><label>Classe</label><select class="form-input" id="mdClasse"><option value="">Todas</option>${classesOpts}</select></div>
+      <div class="form-group"><label>Carga Horária</label><input type="number" class="form-input" id="mdCH"></div>
+    </div>
+    <button class="btn btn-primary" style="width:100%" onclick="salvarDisciplina()"><i class="fas fa-save"></i> Salvar</button>
+  </div>`);
+}
+
+function salvarDisciplina(){
+  const nome=document.getElementById('mdNome').value.trim();
+  const abrev=document.getElementById('mdAbrev').value.trim();
+  const classe=document.getElementById('mdClasse').value;
+  const ch=document.getElementById('mdCH').value;
+  if(!nome)return showToast('Digite o nome!','error');
+  currentSchool.disciplinas.push({id:generateId(),nome,abrev,classe,cargaHoraria:ch});
+  saveSystem();syncToFirebase();closeModal();showToast('Disciplina criada!','success');renderDisciplinas();
+}
+
+// ============ USERS (School Level) ============
+function renderUsers(){
+  if(!currentSchool)return;
+  const users=currentSchool.users.filter(u=>u.perfil!=='director_geral'||currentUser.perfil==='director_geral');
+  let html=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
+    <div><h2 style="font-size:22px;font-weight:700">Utilizadores</h2></div>
+    <button class="btn btn-primary" onclick="modalUser()"><i class="fas fa-plus"></i> Novo</button>
+  </div>
+  <div class="card"><div class="table-container"><table class="data-table">
+    <thead><tr><th>Foto</th><th>Nome</th><th>Perfil</th><th>BI</th><th>Telefone</th><th>Estado</th><th>Acções</th></tr></thead><tbody>`;
+  users.forEach(u=>{
+    html+=`<tr>
+      <td><img class="avatar" src="${u.foto||defaultAvatar()}"></td>
+      <td><strong>${u.nome}</strong><br><small style="color:#6b7280">${u.username}</small></td>
+      <td><span class="badge badge-blue">${PERFIS[u.perfil]||u.perfil}</span></td>
+      <td>${u.bi||'-'}</td><td>${u.telefone||'-'}</td>
+      <td>${u.ativo?'<span class="badge badge-green">Activo</span>':'<span class="badge badge-red">Inactivo</span>'}</td>
+      <td>
+        <button class="btn btn-outline btn-sm" onclick="viewSchoolUser('${u.id}')"><i class="fas fa-eye"></i></button>
+        <button class="btn btn-outline btn-sm" onclick="editSchoolUser('${u.id}')"><i class="fas fa-edit"></i></button>
+      </td></tr>`;
+  });
+  if(users.length===0)html+='<tr><td colspan="7" style="text-align:center;color:#9ca3af;padding:40px">Nenhum utilizador</td></tr>';
+  html+=`</tbody></table></div></div>`;
+  document.getElementById('pageContent').innerHTML=html;
+}
+
+function modalUser(editId){
+  const u=editId?currentSchool.users.find(x=>x.id===editId):null;
+  const pid='uPhoto_'+Date.now(),pvid='uPreview_'+Date.now(),plid='uPlaceholder_'+Date.now();
+
+  const perfilOpts=['subdirector_pedagogico','subdirector_administrativo','secretaria','professor','encarregado'].map(p=>`<option value="${p}" ${u?.perfil===p?'selected':''}>${PERFIS[p]}</option>`).join('');
+
+  openModal(`<div class="modal-header"><h3>${u?'Editar':'Novo'} Utilizador</h3><button onclick="closeModal()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div>
+  <div class="modal-body">
+    <div class="photo-upload" onclick="document.getElementById('${pid}').click()">
+      <img id="${pvid}" src="${u?.foto||''}" style="display:${u?.foto?'block':'none'}">
+      <div id="${plid}" style="display:${u?.foto?'none':'block'}"><i class="fas fa-camera" style="font-size:24px;color:#9ca3af"></i></div>
+      <div class="overlay"><i class="fas fa-camera" style="color:#fff;font-size:20px"></i></div>
+    </div>
+    <input type="file" id="${pid}" accept="image/*" style="display:none" onchange="previewPhoto(this,'${pvid}','${plid}')">
+
+    <h4 style="margin:12px 0"><i class="fas fa-user"></i> Dados Pessoais</h4>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label>Nome Completo *</label><input class="form-input" id="muNome" value="${u?.nome||''}"></div>
+      <div class="form-group"><label>Perfil *</label><select class="form-input" id="muPerfil">${perfilOpts}</select></div>
+      <div class="form-group"><label>Nº do BI *</label><input class="form-input" id="muBI" value="${u?.bi||''}"></div>
+      <div class="form-group"><label>Data de Nascimento *</label><input type="date" class="form-input" id="muNasc" value="${u?.dataNascimento||''}"></div>
+      <div class="form-group"><label>Género *</label><select class="form-input" id="muGenero"><option value="">Selecione</option><option ${u?.genero==='Masculino'?'selected':''}>Masculino</option><option ${u?.genero==='Feminino'?'selected':''}>Feminino</option></select></div>
+      <div class="form-group"><label>Estado Civil</label><select class="form-input" id="muEstCivil"><option value="">Selecione</option><option ${u?.estadoCivil==='Solteiro(a)'?'selected':''}>Solteiro(a)</option><option ${u?.estadoCivil==='Casado(a)'?'selected':''}>Casado(a)</option><option ${u?.estadoCivil==='Divorciado(a)'?'selected':''}>Divorciado(a)</option><option ${u?.estadoCivil==='Viúvo(a)'?'selected':''}>Viúvo(a)</option></select></div>
+      <div class="form-group"><label>Naturalidade</label><input class="form-input" id="muNaturalidade" value="${u?.naturalidade||''}"></div>
+      <div class="form-group"><label>Província</label><select class="form-input" id="muProvincia"><option value="">Selecione</option>${PROVINCIAS.map(p=>`<option ${u?.provincia===p?'selected':''}>${p}</option>`).join('')}</select></div>
+      <div class="form-group"><label>Município</label><input class="form-input" id="muMunicipio" value="${u?.municipio||''}"></div>
+      <div class="form-group"><label>Endereço</label><input class="form-input" id="muEndereco" value="${u?.endereco||''}"></div>
+      <div class="form-group"><label>Telefone *</label><input class="form-input" id="muTelefone" value="${u?.telefone||''}"></div>
+      <div class="form-group"><label>Email</label><input class="form-input" id="muEmail" value="${u?.email||''}"></div>
+    </div>
+
+    <h4 style="margin:12px 0"><i class="fas fa-briefcase"></i> Dados Profissionais</h4>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label>Habilitações Literárias</label><select class="form-input" id="muHab"><option value="">Selecione</option><option ${u?.habilitacoes==='Ensino Médio'?'selected':''}>Ensino Médio</option><option ${u?.habilitacoes==='Bacharelato'?'selected':''}>Bacharelato</option><option ${u?.habilitacoes==='Licenciatura'?'selected':''}>Licenciatura</option><option ${u?.habilitacoes==='Mestrado'?'selected':''}>Mestrado</option><option ${u?.habilitacoes==='Doutoramento'?'selected':''}>Doutoramento</option></select></div>
+      <div class="form-group"><label>Área de Formação</label><input class="form-input" id="muFormacao" value="${u?.areaFormacao||''}"></div>
+      <div class="form-group"><label>Nº de Agente</label><input class="form-input" id="muAgente" value="${u?.numAgente||''}"></div>
+      <div class="form-group"><label>Categoria</label><input class="form-input" id="muCategoria" value="${u?.categoria||''}"></div>
+      <div class="form-group"><label>Classe Salarial</label><input class="form-input" id="muClasseSal" value="${u?.classeSalarial||''}"></div>
+      <div class="form-group"><label>Nº INSS</label><input class="form-input" id="muINSS" value="${u?.numINSS||''}"></div>
+    </div>
+
+    <h4 style="margin:12px 0"><i class="fas fa-key"></i> Credenciais</h4>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label>Username *</label><input class="form-input" id="muUsername" value="${u?.username||''}"></div>
+      <div class="form-group"><label>Senha ${u?'(deixe vazio para manter)':'*'}</label><input type="password" class="form-input" id="muSenha"></div>
+    </div>
+
+    <button class="btn btn-primary" style="width:100%;margin-top:16px" onclick="salvarSchoolUser('${editId||''}','${pvid}')"><i class="fas fa-save"></i> Salvar</button>
+  </div>`);
+}
+
+function editSchoolUser(id){modalUser(id);}
+
+function salvarSchoolUser(editId,previewId){
+  const data={
+    nome:document.getElementById('muNome').value.trim(),
+    perfil:document.getElementById('muPerfil').value,
+    bi:document.getElementById('muBI').value.trim(),
+    dataNascimento:document.getElementById('muNasc').value,
+    genero:document.getElementById('muGenero').value,
+    estadoCivil:document.getElementById('muEstCivil').value,
+    naturalidade:document.getElementById('muNaturalidade').value,
+    provincia:document.getElementById('muProvincia').value,
+    municipio:document.getElementById('muMunicipio').value,
+    endereco:document.getElementById('muEndereco').value,
+    telefone:document.getElementById('muTelefone').value,
+    email:document.getElementById('muEmail').value,
+    habilitacoes:document.getElementById('muHab').value,
+    areaFormacao:document.getElementById('muFormacao').value,
+    numAgente:document.getElementById('muAgente').value,
+    categoria:document.getElementById('muCategoria').value,
+    classeSalarial:document.getElementById('muClasseSal').value,
+    numINSS:document.getElementById('muINSS').value,
+    username:document.getElementById('muUsername').value.trim()
+  };
+  const senha=document.getElementById('muSenha').value;
+  const foto=getPhotoData(previewId);
+
+  if(!data.nome||!data.username)return showToast('Preencha campos obrigatórios!','error');
+  if(!editId&&!senha)return showToast('Digite a senha!','error');
+
+  if(editId){
+    const u=currentSchool.users.find(x=>x.id===editId);
+    if(u){Object.assign(u,data);if(foto)u.foto=foto;if(senha)u.senha=btoa(senha);}
+  }else{
+    currentSchool.users.push({id:generateId(),...data,senha:btoa(senha),foto,ativo:true,dataCriacao:new Date().toISOString()});
+  }
+  saveSystem();syncToFirebase();closeModal();showToast('Utilizador salvo!','success');renderUsers();
+}
+
+function viewSchoolUser(id){
+  const u=currentSchool.users.find(x=>x.id===id);
+  if(!u)return;
+  openModal(`<div class="modal-header"><h3>Perfil do Utilizador</h3><button onclick="closeModal()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div>
+  <div class="modal-body" style="text-align:center">
+    <img class="avatar avatar-xl" src="${u.foto||defaultAvatar()}">
+    <h2 style="margin-top:12px">${u.nome}</h2>
+    <span class="badge badge-blue">${PERFIS[u.perfil]}</span>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;text-align:left;margin-top:24px">
+      <p><strong>BI:</strong> ${u.bi||'-'}</p>
+      <p><strong>Data Nasc.:</strong> ${formatDate(u.dataNascimento)}</p>
+      <p><strong>Género:</strong> ${u.genero||'-'}</p>
+      <p><strong>Telefone:</strong> ${u.telefone||'-'}</p>
+      <p><strong>Email:</strong> ${u.email||'-'}</p>
+      <p><strong>Habilitações:</strong> ${u.habilitacoes||'-'}</p>
+      <p><strong>Nº Agente:</strong> ${u.numAgente||'-'}</p>
+      <p><strong>Categoria:</strong> ${u.categoria||'-'}</p>
+    </div>
+  </div>`);
+}
+
+// ============ PROFESSORES ============
+function renderProfessores(){
+  if(!currentSchool)return;
+  const profs=currentSchool.users.filter(u=>u.perfil==='professor');
+  let html=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
+    <div><h2 style="font-size:22px;font-weight:700">Professores</h2><p style="color:#64748b">${profs.length} professores</p></div>
+    <button class="btn btn-primary" onclick="modalUser()"><i class="fas fa-plus"></i> Novo</button>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px">`;
+  profs.forEach(p=>{
+    html+=`<div class="card" style="display:flex;align-items:center;gap:16px">
+      <img class="avatar avatar-lg" src="${p.foto||defaultAvatar()}">
+      <div><h3 style="font-size:16px">${p.nome}</h3><p style="color:#6b7280;font-size:13px">${p.habilitacoes||'Professor'}</p><p style="color:#9ca3af;font-size:12px"><i class="fas fa-phone"></i> ${p.telefone||'-'}</p></div>
+    </div>`;
+  });
+  if(profs.length===0)html+='<div class="card" style="grid-column:span 3;text-align:center;padding:60px;color:#9ca3af">Nenhum professor</div>';
+  html+='</div>';
+  document.getElementById('pageContent').innerHTML=html;
+}
+
+// ============ ALUNOS ============
+function renderAlunos(){
+  if(!currentSchool)return;
+  let html=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
+    <div><h2 style="font-size:22px;font-weight:700">Alunos</h2><p style="color:#64748b">${currentSchool.students.length} alunos</p></div>
+    <button class="btn btn-primary" onclick="modalAluno()"><i class="fas fa-plus"></i> Novo</button>
+  </div>
+  <div class="filter-row">
+    <select class="form-input" id="fClasse" onchange="renderAlunos()"><option value="">Todas Classes</option>${currentSchool.classes.map(c=>`<option>${c.nome}</option>`).join('')}</select>
+    <select class="form-input" id="fTurma" onchange="renderAlunos()"><option value="">Todas Turmas</option>${currentSchool.turmas.map(t=>`<option value="${t.id}">${t.nome} - ${t.classe}</option>`).join('')}</select>
+  </div>
+  <div class="card"><div class="table-container"><table class="data-table">
+    <thead><tr><th>Foto</th><th>Nº</th><th>Nome</th><th>Classe</th><th>Turma</th><th>Género</th><th>Idade</th><th>Acções</th></tr></thead><tbody>`;
+
+  let students=[...currentSchool.students];
+  const fClasse=document.getElementById('fClasse')?.value;
+  const fTurma=document.getElementById('fTurma')?.value;
+  if(fClasse)students=students.filter(s=>s.classe===fClasse);
+  if(fTurma)students=students.filter(s=>s.turmaId===fTurma);
+
+  students.forEach((s,i)=>{
+    const turma=currentSchool.turmas.find(t=>t.id===s.turmaId);
+    html+=`<tr>
+      <td><img class="avatar" src="${s.foto||defaultAvatar()}"></td>
+      <td>${s.numOrdem||i+1}</td>
+      <td><strong>${s.nome}</strong></td>
+      <td>${s.classe||'-'}</td>
+      <td>${turma?turma.nome:'-'}</td>
+      <td>${s.genero||'-'}</td>
+      <td>${calcAge(s.dataNascimento)}</td>
+      <td>
+        <button class="btn btn-outline btn-sm" onclick="viewAluno('${s.id}')"><i class="fas fa-eye"></i></button>
+        <button class="btn btn-outline btn-sm" onclick="editAluno('${s.id}')"><i class="fas fa-edit"></i></button>
+        <button class="btn btn-danger btn-sm" onclick="deleteSchoolItem('students','${s.id}')"><i class="fas fa-trash"></i></button>
+      </td></tr>`;
+  });
+  if(students.length===0)html+='<tr><td colspan="8" style="text-align:center;color:#9ca3af;padding:40px">Nenhum aluno</td></tr>';
+  html+=`</tbody></table></div></div>`;
+  document.getElementById('pageContent').innerHTML=html;
+}
+
+function modalAluno(editId){
+  const s=editId?currentSchool.students.find(x=>x.id===editId):null;
+  const pid='aPhoto_'+Date.now(),pvid='aPreview_'+Date.now(),plid='aPlaceholder_'+Date.now();
+  const classesOpts=currentSchool.classes.map(c=>`<option ${s?.classe===c.nome?'selected':''}>${c.nome}</option>`).join('');
+  const turmasOpts=currentSchool.turmas.map(t=>`<option value="${t.id}" ${s?.turmaId===t.id?'selected':''}>${t.nome} - ${t.classe}</option>`).join('');
+
+  openModal(`<div class="modal-header"><h3>${s?'Editar':'Novo'} Aluno</h3><button onclick="closeModal()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div>
+  <div class="modal-body">
+    <div class="photo-upload" onclick="document.getElementById('${pid}').click()">
+      <img id="${pvid}" src="${s?.foto||''}" style="display:${s?.foto?'block':'none'}">
+      <div id="${plid}" style="display:${s?.foto?'none':'block'}"><i class="fas fa-camera" style="font-size:24px;color:#9ca3af"></i></div>
+      <div class="overlay"><i class="fas fa-camera" style="color:#fff;font-size:20px"></i></div>
+    </div>
+    <input type="file" id="${pid}" accept="image/*" style="display:none" onchange="previewPhoto(this,'${pvid}','${plid}')">
+
+    <h4 style="margin:12px 0"><i class="fas fa-user"></i> Dados Pessoais</h4>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label>Nome Completo *</label><input class="form-input" id="saNome" value="${s?.nome||''}"></div>
+      <div class="form-group"><label>Data de Nascimento *</label><input type="date" class="form-input" id="saNasc" value="${s?.dataNascimento||''}"></div>
+      <div class="form-group"><label>Género *</label><select class="form-input" id="saGenero"><option value="">Selecione</option><option ${s?.genero==='Masculino'?'selected':''}>Masculino</option><option ${s?.genero==='Feminino'?'selected':''}>Feminino</option></select></div>
+      <div class="form-group"><label>Nº do BI / Cédula</label><input class="form-input" id="saBI" value="${s?.bi||''}"></div>
+      <div class="form-group"><label>Naturalidade</label><input class="form-input" id="saNatural" value="${s?.naturalidade||''}"></div>
+      <div class="form-group"><label>Província</label><select class="form-input" id="saProvincia"><option value="">Selecione</option>${PROVINCIAS.map(p=>`<option ${s?.provincia===p?'selected':''}>${p}</option>`).join('')}</select></div>
+      <div class="form-group"><label>Município</label><input class="form-input" id="saMunicipio" value="${s?.municipio||''}"></div>
+      <div class="form-group"><label>Endereço</label><input class="form-input" id="saEndereco" value="${s?.endereco||''}"></div>
+      <div class="form-group"><label>Grupo Sanguíneo</label><select class="form-input" id="saGrupoSang"><option value="">Selecione</option><option ${s?.grupoSanguineo==='A+'?'selected':''}>A+</option><option ${s?.grupoSanguineo==='A-'?'selected':''}>A-</option><option ${s?.grupoSanguineo==='B+'?'selected':''}>B+</option><option ${s?.grupoSanguineo==='B-'?'selected':''}>B-</option><option ${s?.grupoSanguineo==='AB+'?'selected':''}>AB+</option><option ${s?.grupoSanguineo==='AB-'?'selected':''}>AB-</option><option ${s?.grupoSanguineo==='O+'?'selected':''}>O+</option><option ${s?.grupoSanguineo==='O-'?'selected':''}>O-</option></select></div>
+      <div class="form-group"><label>Nº de Processo</label><input class="form-input" id="saProcesso" value="${s?.numProcesso||''}"></div>
+    </div>
+
+    <h4 style="margin:12px 0"><i class="fas fa-school"></i> Dados Escolares</h4>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label>Classe *</label><select class="form-input" id="saClasse"><option value="">Selecione</option>${classesOpts}</select></div>
+      <div class="form-group"><label>Turma</label><select class="form-input" id="saTurma"><option value="">Selecione</option>${turmasOpts}</select></div>
+      <div class="form-group"><label>Nº de Ordem</label><input type="number" class="form-input" id="saOrdem" value="${s?.numOrdem||''}"></div>
+      <div class="form-group"><label>Escola Anterior</label><input class="form-input" id="saEscolaAnt" value="${s?.escolaAnterior||''}"></div>
+    </div>
+
+    <h4 style="margin:12px 0"><i class="fas fa-user-friends"></i> Encarregado de Educação</h4>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label>Nome do Pai</label><input class="form-input" id="saPai" value="${s?.nomePai||''}"></div>
+      <div class="form-group"><label>Nome da Mãe</label><input class="form-input" id="saMae" value="${s?.nomeMae||''}"></div>
+      <div class="form-group"><label>Nome do Encarregado</label><input class="form-input" id="saEncarregado" value="${s?.nomeEncarregado||''}"></div>
+      <div class="form-group"><label>Telefone do Encarregado</label><input class="form-input" id="saTelEnc" value="${s?.telefoneEncarregado||''}"></div>
+      <div class="form-group"><label>Profissão do Encarregado</label><input class="form-input" id="saProfEnc" value="${s?.profissaoEncarregado||''}"></div>
+      <div class="form-group"><label>Parentesco</label><select class="form-input" id="saParentesco"><option value="">Selecione</option><option ${s?.parentesco==='Pai'?'selected':''}>Pai</option><option ${s?.parentesco==='Mãe'?'selected':''}>Mãe</option><option ${s?.parentesco==='Avô/Avó'?'selected':''}>Avô/Avó</option><option ${s?.parentesco==='Tio(a)'?'selected':''}>Tio(a)</option><option ${s?.parentesco==='Outro'?'selected':''}>Outro</option></select></div>
+    </div>
+
+    <button class="btn btn-primary" style="width:100%;margin-top:16px" onclick="salvarAluno('${editId||''}','${pvid}')"><i class="fas fa-save"></i> Salvar Aluno</button>
+  </div>`);
+}
+
+function editAluno(id){modalAluno(id);}
+
+function salvarAluno(editId,previewId){
+  const data={
+    nome:document.getElementById('saNome').value.trim(),
+    dataNascimento:document.getElementById('saNasc').value,
+    genero:document.getElementById('saGenero').value,
+    bi:document.getElementById('saBI').value,
+    naturalidade:document.getElementById('saNatural').value,
+    provincia:document.getElementById('saProvincia').value,
+    municipio:document.getElementById('saMunicipio').value,
+    endereco:document.getElementById('saEndereco').value,
+    grupoSanguineo:document.getElementById('saGrupoSang').value,
+    numProcesso:document.getElementById('saProcesso').value,
+    classe:document.getElementById('saClasse').value,
+    turmaId:document.getElementById('saTurma').value,
+    numOrdem:document.getElementById('saOrdem').value,
+    escolaAnterior:document.getElementById('saEscolaAnt').value,
+    nomePai:document.getElementById('saPai').value,
+    nomeMae:document.getElementById('saMae').value,
+    nomeEncarregado:document.getElementById('saEncarregado').value,
+    telefoneEncarregado:document.getElementById('saTelEnc').value,
+    profissaoEncarregado:document.getElementById('saProfEnc').value,
+    parentesco:document.getElementById('saParentesco').value
+  };
+  const foto=getPhotoData(previewId);
+
+  if(!data.nome||!data.classe)return showToast('Preencha os campos obrigatórios!','error');
+
+  if(editId){
+    const s=currentSchool.students.find(x=>x.id===editId);
+    if(s){Object.assign(s,data);if(foto)s.foto=foto;}
+  }else{
+    currentSchool.students.push({id:generateId(),...data,foto,dataCriacao:new Date().toISOString()});
+  }
+  saveSystem();syncToFirebase();closeModal();showToast('Aluno salvo!','success');renderAlunos();
+}
+
+function viewAluno(id){
+  const s=currentSchool.students.find(x=>x.id===id);
+  if(!s)return;
+  const turma=currentSchool.turmas.find(t=>t.id===s.turmaId);
+  openModal(`<div class="modal-header"><h3>Ficha do Aluno</h3><button onclick="closeModal()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div>
+  <div class="modal-body" style="text-align:center">
+    <img class="avatar avatar-xl" src="${s.foto||defaultAvatar()}">
+    <h2 style="margin-top:12px">${s.nome}</h2>
+    <p style="color:#6b7280">${s.classe||''} ${turma?'- Turma '+turma.nome:''}</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;text-align:left;margin-top:24px">
+      <p><strong>Data Nasc.:</strong> ${formatDate(s.dataNascimento)} (${calcAge(s.dataNascimento)} anos)</p>
+      <p><strong>Género:</strong> ${s.genero||'-'}</p>
+      <p><strong>BI:</strong> ${s.bi||'-'}</p>
+      <p><strong>Nº Processo:</strong> ${s.numProcesso||'-'}</p>
+      <p><strong>Naturalidade:</strong> ${s.naturalidade||'-'}</p>
+      <p><strong>Província:</strong> ${s.provincia||'-'}</p>
+      <p><strong>Pai:</strong> ${s.nomePai||'-'}</p>
+      <p><strong>Mãe:</strong> ${s.nomeMae||'-'}</p>
+      <p><strong>Encarregado:</strong> ${s.nomeEncarregado||'-'}</p>
+      <p><strong>Tel. Encarregado:</strong> ${s.telefoneEncarregado||'-'}</p>
+    </div>
+  </div>`);
+}
+
+// ============ MATRÍCULAS ============
+function renderMatriculas(){
+  if(!currentSchool)return;
+  const anoAtivo=currentSchool.anoLetivo.find(a=>a.ativo);
+  let html=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
+    <div><h2 style="font-size:22px;font-weight:700">Matrículas</h2><p style="color:#64748b">Ano: ${anoAtivo?.ano||'Sem ano activo'}</p></div>
+    <button class="btn btn-primary" onclick="modalMatricula()"><i class="fas fa-plus"></i> Nova</button>
+  </div>
+  <div class="card"><div class="table-container"><table class="data-table">
+    <thead><tr><th>Aluno</th><th>Classe</th><th>Turma</th><th>Ano</th><th>Data</th><th>Estado</th></tr></thead><tbody>`;
+  (currentSchool.matriculas||[]).forEach(m=>{
+    const al=currentSchool.students.find(s=>s.id===m.alunoId);
+    const turma=currentSchool.turmas.find(t=>t.id===m.turmaId);
+    html+=`<tr><td>${al?al.nome:'-'}</td><td>${m.classe||'-'}</td><td>${turma?turma.nome:'-'}</td>
+    <td>${m.anoLetivo}</td><td>${formatDate(m.data)}</td>
+    <td><span class="badge badge-green">${m.estado||'Activa'}</span></td></tr>`;
+  });
+  if((currentSchool.matriculas||[]).length===0)html+='<tr><td colspan="6" style="text-align:center;color:#9ca3af;padding:40px">Nenhuma matrícula</td></tr>';
+  html+=`</tbody></table></div></div>`;
+  document.getElementById('pageContent').innerHTML=html;
+}
+
+function modalMatricula(){
+  const anoAtivo=currentSchool.anoLetivo.find(a=>a.ativo);
+  const alunosOpts=currentSchool.students.map(s=>`<option value="${s.id}">${s.nome} - ${s.classe||''}</option>`).join('');
+  const classesOpts=currentSchool.classes.map(c=>`<option>${c.nome}</option>`).join('');
+  const turmasOpts=currentSchool.turmas.map(t=>`<option value="${t.id}">${t.nome} - ${t.classe}</option>`).join('');
+
+  openModal(`<div class="modal-header"><h3>Nova Matrícula</h3><button onclick="closeModal()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div>
+  <div class="modal-body">
+    <div class="form-group"><label>Aluno *</label><select class="form-input" id="mmAluno"><option value="">Selecione</option>${alunosOpts}</select></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label>Classe *</label><select class="form-input" id="mmClasse">${classesOpts}</select></div>
+      <div class="form-group"><label>Turma</label><select class="form-input" id="mmTurma"><option value="">Selecione</option>${turmasOpts}</select></div>
+      <div class="form-group"><label>Ano Lectivo</label><input class="form-input" id="mmAno" value="${anoAtivo?.ano||''}" readonly></div>
+      <div class="form-group"><label>Data</label><input type="date" class="form-input" id="mmData" value="${new Date().toISOString().split('T')[0]}"></div>
+    </div>
+    <button class="btn btn-primary" style="width:100%" onclick="salvarMatricula()"><i class="fas fa-save"></i> Salvar</button>
+  </div>`);
+}
+
+function salvarMatricula(){
+  const alunoId=document.getElementById('mmAluno').value;
+  const classe=document.getElementById('mmClasse').value;
+  const turmaId=document.getElementById('mmTurma').value;
+  const anoLetivo=document.getElementById('mmAno').value;
+  const data=document.getElementById('mmData').value;
+  if(!alunoId||!classe)return showToast('Preencha os campos!','error');
+
+  const al=currentSchool.students.find(s=>s.id===alunoId);
+  if(al){al.classe=classe;if(turmaId)al.turmaId=turmaId;}
+
+  currentSchool.matriculas.push({id:generateId(),alunoId,classe,turmaId,anoLetivo,data,estado:'Activa'});
+  saveSystem();syncToFirebase();closeModal();showToast('Matrícula registada!','success');renderMatriculas();
+}
+
+// ============ NOTAS ============
+function renderNotas(){
+  if(!currentSchool)return;
+  const anosOpts=currentSchool.anoLetivo.map(a=>`<option value="${a.ano}" ${a.ativo?'selected':''}>${a.ano}</option>`).join('');
+  const classesOpts=currentSchool.classes.map(c=>`<option value="${c.nome}">${c.nome}</option>`).join('');
+  const turmasOpts=currentSchool.turmas.map(t=>`<option value="${t.id}">${t.nome} - ${t.classe}</option>`).join('');
+
+  let html=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
+    <div><h2 style="font-size:22px;font-weight:700">Notas / Pautas</h2><p style="color:#64748b">Lançamento e gestão de notas</p></div>
+    <button class="btn btn-primary" onclick="modalLancarNotas()"><i class="fas fa-plus"></i> Lançar Notas</button>
+  </div>
+  <div class="filter-row">
+    <select class="form-input" id="nfAno">${anosOpts}</select>
+    <select class="form-input" id="nfClasse"><option value="">Todas Classes</option>${classesOpts}</select>
+    <select class="form-input" id="nfTurma"><option value="">Todas Turmas</option>${turmasOpts}</select>
+    <select class="form-input" id="nfTrimestre"><option value="">Todos Trimestres</option>${currentSchool.trimestres.map(t=>`<option value="${t.nome}">${t.nome}</option>`).join('')}</select>
+    <button class="btn btn-outline" onclick="filtrarNotas()"><i class="fas fa-search"></i> Filtrar</button>
+  </div>
+  <div class="card"><div class="table-container"><table class="data-table" id="tabelaNotas">
+    <thead><tr><th>Aluno</th><th>Classe</th><th>Disciplina</th><th>Trimestre</th><th>MAC</th><th>NPP</th><th>NPT</th><th>MT</th><th>Acções</th></tr></thead><tbody>`;
+
+  (currentSchool.notas||[]).forEach(n=>{
+    const al=currentSchool.students.find(s=>s.id===n.alunoId);
+    const mt=calcMT(n);
+    html+=`<tr>
+      <td>${al?al.nome:'-'}</td><td>${n.classe||'-'}</td><td>${n.disciplina}</td><td>${n.trimestre}</td>
+      <td>${n.mac||'-'}</td><td>${n.npp||'-'}</td><td>${n.npt||'-'}</td>
+      <td><strong style="color:${mt>=10?'var(--secondary)':'var(--danger)'}">${mt.toFixed(1)}</strong></td>
+      <td><button class="btn btn-outline btn-sm" onclick="editNota('${n.id}')"><i class="fas fa-edit"></i></button></td>
+    </tr>`;
+  });
+  if((currentSchool.notas||[]).length===0)html+='<tr><td colspan="9" style="text-align:center;color:#9ca3af;padding:40px">Nenhuma nota lançada</td></tr>';
+  html+=`</tbody></table></div></div>`;
+  document.getElementById('pageContent').innerHTML=html;
+}
+
+function calcMT(n){
+  const mac=parseFloat(n.mac)||0;
+  const npp=parseFloat(n.npp)||0;
+  const npt=parseFloat(n.npt)||0;
+  return(mac+npp+npt)/3;
+}
+
+function modalLancarNotas(){
+  const anoAtivo=currentSchool.anoLetivo.find(a=>a.ativo);
+  const classesOpts=currentSchool.classes.map(c=>`<option value="${c.nome}">${c.nome}</option>`).join('');
+  const discOpts=currentSchool.disciplinas.map(d=>`<option value="${d.nome}">${d.nome}</option>`).join('');
+  const triOpts=currentSchool.trimestres.filter(t=>t.anoLetivo===anoAtivo?.ano).map(t=>`<option value="${t.nome}" ${t.ativo?'selected':''}>${t.nome}</option>`).join('');
+
+  openModal(`<div class="modal-header"><h3>Lançar Notas</h3><button onclick="closeModal()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div>
+  <div class="modal-body">
+    <h4 style="margin-bottom:12px"><i class="fas fa-filter"></i> Seleccione os Filtros</h4>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label>Ano Lectivo *</label><input class="form-input" id="lnAno" value="${anoAtivo?.ano||''}" readonly></div>
+      <div class="form-group"><label>Trimestre *</label><select class="form-input" id="lnTri">${triOpts}</select></div>
+      <div class="form-group"><label>Classe *</label><select class="form-input" id="lnClasse" onchange="updateLnTurmas();updateLnAlunos()">${classesOpts}</select></div>
+      <div class="form-group"><label>Turma</label><select class="form-input" id="lnTurma" onchange="updateLnAlunos()"><option value="">Todas</option></select></div>
+      <div class="form-group"><label>Disciplina *</label><select class="form-input" id="lnDisc">${discOpts}</select></div>
+      <div class="form-group"><label>Aluno (ou todos da turma)</label><select class="form-input" id="lnAluno"><option value="">Todos da Turma</option></select></div>
+    </div>
+    <div id="lnNotasArea" style="margin-top:16px;max-height:300px;overflow-y:auto"></div>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn btn-outline" onclick="carregarAlunosNotas()"><i class="fas fa-users"></i> Carregar Alunos</button>
+      <button class="btn btn-primary" onclick="salvarTodasNotas()"><i class="fas fa-save"></i> Salvar Notas</button>
+    </div>
+  </div>`);
+  updateLnTurmas();
+}
+
+function updateLnTurmas(){
+  const classe=document.getElementById('lnClasse').value;
+  const turmas=currentSchool.turmas.filter(t=>t.classe===classe);
+  document.getElementById('lnTurma').innerHTML='<option value="">Todas</option>'+turmas.map(t=>`<option value="${t.id}">${t.nome}</option>`).join('');
+}
+
+function updateLnAlunos(){
+  const classe=document.getElementById('lnClasse').value;
+  const turmaId=document.getElementById('lnTurma').value;
+  let alunos=currentSchool.students.filter(s=>s.classe===classe);
+  if(turmaId)alunos=alunos.filter(s=>s.turmaId===turmaId);
+  document.getElementById('lnAluno').innerHTML='<option value="">Todos da Turma</option>'+alunos.map(a=>`<option value="${a.id}">${a.nome}</option>`).join('');
+}
+
+function carregarAlunosNotas(){
+  const classe=document.getElementById('lnClasse').value;
+  const turmaId=document.getElementById('lnTurma').value;
+  const alunoId=document.getElementById('lnAluno').value;
+
+  let alunos=currentSchool.students.filter(s=>s.classe===classe);
+  if(turmaId)alunos=alunos.filter(s=>s.turmaId===turmaId);
+  if(alunoId)alunos=alunos.filter(s=>s.id===alunoId);
+
+  let html='<table class="data-table"><thead><tr><th>Aluno</th><th>MAC (0-20)</th><th>NPP (0-20)</th><th>NPT (0-20)</th></tr></thead><tbody>';
+  alunos.forEach(a=>{
+    html+=`<tr data-aluno="${a.id}">
+      <td>${a.nome}</td>
+      <td><input type="number" class="form-input nota-mac" min="0" max="20" step="0.1" style="width:80px"></td>
+      <td><input type="number" class="form-input nota-npp" min="0" max="20" step="0.1" style="width:80px"></td>
+      <td><input type="number" class="form-input nota-npt" min="0" max="20" step="0.1" style="width:80px"></td>
+    </tr>`;
+  });
+  html+='</tbody></table>';
+  if(alunos.length===0)html='<p style="text-align:center;color:#9ca3af">Nenhum aluno encontrado</p>';
+  document.getElementById('lnNotasArea').innerHTML=html;
+}
+
+function salvarTodasNotas(){
+  const ano=document.getElementById('lnAno').value;
+  const trimestre=document.getElementById('lnTri').value;
+  const classe=document.getElementById('lnClasse').value;
+  const disciplina=document.getElementById('lnDisc').value;
+
+  if(!trimestre||!classe||!disciplina)return showToast('Seleccione os filtros!','error');
+
+  const rows=document.querySelectorAll('#lnNotasArea tr[data-aluno]');
+  let count=0;
+  rows.forEach(row=>{
+    const alunoId=row.dataset.aluno;
+    const mac=row.querySelector('.nota-mac').value;
+    const npp=row.querySelector('.nota-npp').value;
+    const npt=row.querySelector('.nota-npt').value;
+
+    if(mac||npp||npt){
+      // Check if exists
+      const existing=currentSchool.notas.find(n=>n.alunoId===alunoId&&n.disciplina===disciplina&&n.trimestre===trimestre&&n.anoLetivo===ano);
+      if(existing){
+        if(mac)existing.mac=mac;
+        if(npp)existing.npp=npp;
+        if(npt)existing.npt=npt;
+      }else{
+        currentSchool.notas.push({id:generateId(),alunoId,classe,disciplina,trimestre,anoLetivo:ano,mac,npp,npt,dataCriacao:new Date().toISOString()});
+      }
+      count++;
+    }
+  });
+
+  if(count===0)return showToast('Digite pelo menos uma nota!','error');
+  saveSystem();syncToFirebase();closeModal();showToast(`${count} nota(s) salva(s)!`,'success');renderNotas();
+}
+
+function editNota(id){
+  const n=currentSchool.notas.find(x=>x.id===id);
+  if(!n)return;
+  const al=currentSchool.students.find(s=>s.id===n.alunoId);
+  openModal(`<div class="modal-header"><h3>Editar Nota - ${al?al.nome:''}</h3><button onclick="closeModal()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div>
+  <div class="modal-body">
+    <p><strong>Disciplina:</strong> ${n.disciplina} | <strong>Trimestre:</strong> ${n.trimestre}</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:16px">
+      <div class="form-group"><label>MAC</label><input type="number" class="form-input" id="enMAC" value="${n.mac||''}" min="0" max="20" step="0.1"></div>
+      <div class="form-group"><label>NPP</label><input type="number" class="form-input" id="enNPP" value="${n.npp||''}" min="0" max="20" step="0.1"></div>
+      <div class="form-group"><label>NPT</label><input type="number" class="form-input" id="enNPT" value="${n.npt||''}" min="0" max="20" step="0.1"></div>
+    </div>
+    <button class="btn btn-primary" style="width:100%" onclick="updateNota('${id}')"><i class="fas fa-save"></i> Actualizar</button>
+  </div>`);
+}
+
+function updateNota(id){
+  const n=currentSchool.notas.find(x=>x.id===id);
+  if(n){
+    n.mac=document.getElementById('enMAC').value;
+    n.npp=document.getElementById('enNPP').value;
+    n.npt=document.getElementById('enNPT').value;
+    saveSystem();syncToFirebase();closeModal();showToast('Nota actualizada!','success');renderNotas();
+  }
+}
+
+function filtrarNotas(){
+  // Just re-render for now
+  renderNotas();
+}
+
+// ============ FREQUÊNCIA ============
+function renderFrequencia(){
+  if(!currentSchool)return;
+  let html=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
+    <div><h2 style="font-size:22px;font-weight:700">Frequência</h2></div>
+    <button class="btn btn-primary" onclick="modalFrequencia()"><i class="fas fa-plus"></i> Registar</button>
+  </div>
+  <div class="card"><div class="table-container"><table class="data-table">
+    <thead><tr><th>Data</th><th>Classe</th><th>Turma</th><th>Presentes</th><th>Faltosos</th></tr></thead><tbody>`;
+  const registos=[...(currentSchool.frequencia||[])].sort((a,b)=>new Date(b.data)-new Date(a.data));
+  registos.slice(0,50).forEach(r=>{
+    const turma=currentSchool.turmas.find(t=>t.id===r.turmaId);
+    html+=`<tr><td>${formatDate(r.data)}</td><td>${r.classe||'-'}</td><td>${turma?turma.nome:'-'}</td>
+    <td><span class="badge badge-green">${r.presentes||0}</span></td><td><span class="badge badge-red">${r.faltosos||0}</span></td></tr>`;
+  });
+  if(registos.length===0)html+='<tr><td colspan="5" style="text-align:center;color:#9ca3af;padding:40px">Nenhum registo</td></tr>';
+  html+=`</tbody></table></div></div>`;
+  document.getElementById('pageContent').innerHTML=html;
+}
+
+function modalFrequencia(){
+  const classesOpts=currentSchool.classes.map(c=>`<option>${c.nome}</option>`).join('');
+  const turmasOpts=currentSchool.turmas.map(t=>`<option value="${t.id}">${t.nome} - ${t.classe}</option>`).join('');
+  openModal(`<div class="modal-header"><h3>Registar Frequência</h3><button onclick="closeModal()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div>
+  <div class="modal-body">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label>Data *</label><input type="date" class="form-input" id="frData" value="${new Date().toISOString().split('T')[0]}"></div>
+      <div class="form-group"><label>Classe *</label><select class="form-input" id="frClasse" onchange="loadFreqAlunos()">${classesOpts}</select></div>
+      <div class="form-group"><label>Turma</label><select class="form-input" id="frTurma" onchange="loadFreqAlunos()"><option value="">Todas</option>${turmasOpts}</select></div>
+    </div>
+    <div id="freqAlunos" style="margin-top:16px;max-height:300px;overflow-y:auto"></div>
+    <button class="btn btn-primary" style="width:100%;margin-top:16px" onclick="salvarFrequencia()"><i class="fas fa-save"></i> Salvar</button>
+  </div>`);
+  setTimeout(loadFreqAlunos,100);
+}
+
+function loadFreqAlunos(){
+  const classe=document.getElementById('frClasse').value;
+  const turmaId=document.getElementById('frTurma').value;
+  let alunos=currentSchool.students.filter(s=>s.classe===classe);
+  if(turmaId)alunos=alunos.filter(s=>s.turmaId===turmaId);
+
+  let html='';
+  alunos.forEach(a=>{
+    html+=`<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-bottom:1px solid #f1f5f9">
+      <div style="display:flex;align-items:center;gap:10px">
+        <img class="avatar" src="${a.foto||defaultAvatar()}" style="width:32px;height:32px">
+        <span>${a.nome}</span>
+      </div>
+      <div>
+        <label style="margin-right:16px"><input type="radio" name="freq_${a.id}" value="P" checked> Presente</label>
+        <label><input type="radio" name="freq_${a.id}" value="F"> Falta</label>
+      </div>
+    </div>`;
+  });
+  document.getElementById('freqAlunos').innerHTML=html||'<p style="text-align:center;color:#9ca3af">Nenhum aluno</p>';
+}
+
+function salvarFrequencia(){
+  const data=document.getElementById('frData').value;
+  const classe=document.getElementById('frClasse').value;
+  const turmaId=document.getElementById('frTurma').value;
+  if(!data||!classe)return showToast('Preencha os campos!','error');
+
+  let alunos=currentSchool.students.filter(s=>s.classe===classe);
+  if(turmaId)alunos=alunos.filter(s=>s.turmaId===turmaId);
+
+  let presentes=0,faltosos=0;
+  alunos.forEach(a=>{
+    const radios=document.querySelectorAll(`input[name="freq_${a.id}"]`);
+    let estado='P';
+    radios.forEach(r=>{if(r.checked)estado=r.value;});
+    if(estado==='P')presentes++;else faltosos++;
+  });
+
+  currentSchool.frequencia.push({id:generateId(),data,classe,turmaId,presentes,faltosos});
+  saveSystem();syncToFirebase();closeModal();showToast('Frequência registada!','success');renderFrequencia();
+}
+
+// ============ DOCUMENTOS ============
+function renderDocumentos(){
+  if(!currentSchool)return;
+  const anosOpts=currentSchool.anoLetivo.map(a=>`<option value="${a.ano}" ${a.ativo?'selected':''}>${a.ano}</option>`).join('');
+  const classesOpts=currentSchool.classes.map(c=>`<option value="${c.nome}">${c.nome}</option>`).join('');
+  const turmasOpts=currentSchool.turmas.map(t=>`<option value="${t.id}">${t.nome} - ${t.classe}</option>`).join('');
+
+  let html=`<div style="margin-bottom:24px">
+    <h2 style="font-size:22px;font-weight:700">Documentos</h2>
+    <p style="color:#64748b">Gerar declarações, boletins e certificados</p>
+  </div>
+
+  <div class="card" style="margin-bottom:24px">
+    <h3 style="margin-bottom:16px"><i class="fas fa-filter"></i> Seleccione os Filtros</h3>
+    <div class="filter-row" style="margin-bottom:0">
+      <select class="form-input" id="docAno">${anosOpts}</select>
+      <select class="form-input" id="docClasse" onchange="updateDocTurmas()"><option value="">Selecione Classe</option>${classesOpts}</select>
+      <select class="form-input" id="docTurma" onchange="updateDocAlunos()"><option value="">Todas Turmas</option></select>
+      <select class="form-input" id="docAluno"><option value="">Todos Alunos</option></select>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px">
+    <div class="card" style="text-align:center">
+      <div style="width:64px;height:64px;background:#dbeafe;border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px">
+        <i class="fas fa-file-alt" style="font-size:28px;color:#2563eb"></i>
+      </div>
+      <h3>Declaração</h3>
+      <p style="color:#6b7280;font-size:13px;margin:8px 0">Declaração com dados e notas</p>
+      <div style="display:flex;gap:8px;justify-content:center;margin-top:12px">
+        <button class="btn btn-danger btn-sm" onclick="gerarDocPDF('declaracao')"><i class="fas fa-file-pdf"></i> PDF</button>
+        <button class="btn btn-primary btn-sm" onclick="gerarDocDOCX('declaracao')"><i class="fas fa-file-word"></i> DOCX</button>
+      </div>
+    </div>
+    <div class="card" style="text-align:center">
+      <div style="width:64px;height:64px;background:#d1fae5;border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px">
+        <i class="fas fa-clipboard-list" style="font-size:28px;color:#059669"></i>
+      </div>
+      <h3>Boletim de Notas</h3>
+      <p style="color:#6b7280;font-size:13px;margin:8px 0">Boletim completo com notas</p>
+      <div style="display:flex;gap:8px;justify-content:center;margin-top:12px">
+        <button class="btn btn-danger btn-sm" onclick="gerarDocPDF('boletim')"><i class="fas fa-file-pdf"></i> PDF</button>
+        <button class="btn btn-primary btn-sm" onclick="gerarDocDOCX('boletim')"><i class="fas fa-file-word"></i> DOCX</button>
+      </div>
+    </div>
+    <div class="card" style="text-align:center">
+      <div style="width:64px;height:64px;background:#fef3c7;border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px">
+        <i class="fas fa-certificate" style="font-size:28px;color:#d97706"></i>
+      </div>
+      <h3>Certificado</h3>
+      <p style="color:#6b7280;font-size:13px;margin:8px 0">Certificado de conclusão</p>
+      <div style="display:flex;gap:8px;justify-content:center;margin-top:12px">
+        <button class="btn btn-danger btn-sm" onclick="gerarDocPDF('certificado')"><i class="fas fa-file-pdf"></i> PDF</button>
+        <button class="btn btn-primary btn-sm" onclick="gerarDocDOCX('certificado')"><i class="fas fa-file-word"></i> DOCX</button>
+      </div>
+    </div>
+  </div>`;
+  document.getElementById('pageContent').innerHTML=html;
+}
+
+function updateDocTurmas(){
+  const classe=document.getElementById('docClasse').value;
+  const turmas=currentSchool.turmas.filter(t=>t.classe===classe);
+  document.getElementById('docTurma').innerHTML='<option value="">Todas Turmas</option>'+turmas.map(t=>`<option value="${t.id}">${t.nome}</option>`).join('');
+  updateDocAlunos();
+}
+
+function updateDocAlunos(){
+  const classe=document.getElementById('docClasse').value;
+  const turmaId=document.getElementById('docTurma').value;
+  let alunos=currentSchool.students.filter(s=>s.classe===classe);
+  if(turmaId)alunos=alunos.filter(s=>s.turmaId===turmaId);
+  document.getElementById('docAluno').innerHTML='<option value="">Todos Alunos ('+alunos.length+')</option>'+alunos.map(a=>`<option value="${a.id}">${a.nome}</option>`).join('');
+}
+
+function getSelectedAlunos(){
+  const classe=document.getElementById('docClasse').value;
+  const turmaId=document.getElementById('docTurma').value;
+  const alunoId=document.getElementById('docAluno').value;
+
+  if(!classe)return[];
+  let alunos=currentSchool.students.filter(s=>s.classe===classe);
+  if(turmaId)alunos=alunos.filter(s=>s.turmaId===turmaId);
+  if(alunoId)alunos=alunos.filter(s=>s.id===alunoId);
+  return alunos;
+}
+
+function gerarDocPDF(tipo){
+  const alunos=getSelectedAlunos();
+  if(alunos.length===0)return showToast('Selecione a classe!','error');
+
+  const{jsPDF}=window.jspdf;
+  const doc=new jsPDF();
+  const anoLetivo=document.getElementById('docAno').value;
+  const escola=currentSchool.info;
+
+  alunos.forEach((al,idx)=>{
+    if(idx>0)doc.addPage();
+
+    // Header
+    doc.setFontSize(14);doc.setFont(undefined,'bold');
+    doc.text('REPÚBLICA DE ANGOLA',105,15,{align:'center'});
+    doc.setFontSize(11);doc.text('MINISTÉRIO DA EDUCAÇÃO',105,22,{align:'center'});
+    doc.setFontSize(13);doc.text(escola.nome.toUpperCase(),105,30,{align:'center'});
+    doc.setLineWidth(0.5);doc.line(20,34,190,34);
+
+    if(tipo==='declaracao'){
+      doc.setFontSize(16);doc.setFont(undefined,'bold');
+      doc.text('DECLARAÇÃO',105,48,{align:'center'});
+
+      doc.setFontSize(11);doc.setFont(undefined,'normal');
+      const texto=`Para os devidos efeitos, declara-se que ${al.nome}, portador(a) do Bilhete de Identidade nº ${al.bi||'_______'}, nascido(a) em ${formatDate(al.dataNascimento)}, natural de ${al.naturalidade||'_______'}, província de ${al.provincia||'_______'}, filho(a) de ${al.nomePai||'_______'} e de ${al.nomeMae||'_______'}, encontra-se matriculado(a) nesta instituição de ensino na ${al.classe||'_______'}, no ano lectivo de ${anoLetivo}.`;
+      const lines=doc.splitTextToSize(texto,160);
+      doc.text(lines,25,65);
+
+      // Notas do aluno
+      const notasAluno=currentSchool.notas.filter(n=>n.alunoId===al.id&&n.anoLetivo===anoLetivo);
+      if(notasAluno.length>0){
+        let y=65+lines.length*7+15;
+        doc.setFont(undefined,'bold');doc.text('Aproveitamento Escolar:',25,y);y+=8;
+        const tableData=notasAluno.map(n=>[n.disciplina,n.trimestre,n.mac||'-',n.npp||'-',n.npt||'-',calcMT(n).toFixed(1)]);
+        doc.autoTable({startY:y,head:[['Disciplina','Trimestre','MAC','NPP','NPT','Média']],body:tableData,margin:{left:25,right:25},styles:{fontSize:9},headStyles:{fillColor:[30,64,175]}});
+      }
+
+      const finalY=doc.lastAutoTable?doc.lastAutoTable.finalY+25:140;
+      doc.setFont(undefined,'normal');
+      doc.text(`${escola.municipio||'Local'}, ${new Date().toLocaleDateString('pt-AO')}`,25,finalY);
+      doc.text('_________________________________',25,finalY+20);
+      doc.text('O(A) Director(a) Geral',25,finalY+27);
+
+    }else if(tipo==='boletim'){
+      doc.setFontSize(14);doc.setFont(undefined,'bold');
+      doc.text('BOLETIM DE NOTAS',105,48,{align:'center'});
+
+      doc.setFontSize(10);doc.setFont(undefined,'normal');
+      let y=60;
+      doc.text(`Nome: ${al.nome}`,25,y);doc.text(`Classe: ${al.classe||'-'}`,140,y);y+=6;
+      doc.text(`Data Nasc.: ${formatDate(al.dataNascimento)}`,25,y);doc.text(`Nº Processo: ${al.numProcesso||'-'}`,140,y);y+=6;
+      doc.text(`Pai: ${al.nomePai||'-'}  |  Mãe: ${al.nomeMae||'-'}`,25,y);y+=10;
+
+      const notasAluno=currentSchool.notas.filter(n=>n.alunoId===al.id&&n.anoLetivo===anoLetivo);
+      const tableData=notasAluno.map(n=>[n.disciplina,n.trimestre,n.mac||'-',n.npp||'-',n.npt||'-',calcMT(n).toFixed(1),calcMT(n)>=10?'Aprovado':'Reprovado']);
+      doc.autoTable({startY:y,head:[['Disciplina','Trimestre','MAC','NPP','NPT','MT','Resultado']],body:tableData.length>0?tableData:[['Sem notas','','','','','','']],margin:{left:25,right:25},styles:{fontSize:9},headStyles:{fillColor:[30,64,175]}});
+
+      const fy=doc.lastAutoTable.finalY+20;
+      doc.text(`Data: ${new Date().toLocaleDateString('pt-AO')}`,25,fy);
+      doc.text('________________________',25,fy+15);doc.text('Director(a)',25,fy+22);
+      doc.text('________________________',120,fy+15);doc.text('Secretário(a)',120,fy+22);
+
+    }else{
+      doc.setFontSize(18);doc.setFont(undefined,'bold');
+      doc.text('CERTIFICADO',105,50,{align:'center'});
+
+      doc.setFontSize(11);doc.setFont(undefined,'normal');
+      const texto=`Certifica-se que ${al.nome}, portador(a) do BI nº ${al.bi||'_______'}, nascido(a) em ${formatDate(al.dataNascimento)}, natural de ${al.naturalidade||'_______'}, província de ${al.provincia||'_______'}, concluiu com aproveitamento a ${al.classe||'_______'} nesta instituição, no ano lectivo de ${anoLetivo}.`;
+      const lines=doc.splitTextToSize(texto,160);
+      doc.text(lines,25,70);
+
+      doc.text(`${escola.municipio||'Local'}, ${new Date().toLocaleDateString('pt-AO')}`,25,130);
+      doc.text('_________________________________',25,155);
+      doc.text('O(A) Director(a) Geral',25,162);
+    }
+  });
+
+  doc.save(`${tipo}_${alunos.length===1?alunos[0].nome.replace(/\s+/g,'_'):'turma'}.pdf`);
+  showToast('PDF gerado com '+alunos.length+' documento(s)!','success');
+}
+
+function gerarDocDOCX(tipo){
+  const alunos=getSelectedAlunos();
+  if(alunos.length===0)return showToast('Selecione a classe!','error');
+
+  const{Document,Packer,Paragraph,TextRun,AlignmentType,Table,TableRow,TableCell,WidthType,PageBreak}=docx;
+  const anoLetivo=document.getElementById('docAno').value;
+  const escola=currentSchool.info;
+
+  const children=[];
+
+  alunos.forEach((al,idx)=>{
+    if(idx>0)children.push(new Paragraph({children:[new PageBreak()]}));
+
+    children.push(new Paragraph({alignment:AlignmentType.CENTER,children:[new TextRun({text:'REPÚBLICA DE ANGOLA',bold:true,size:24})]}));
+    children.push(new Paragraph({alignment:AlignmentType.CENTER,children:[new TextRun({text:'MINISTÉRIO DA EDUCAÇÃO',size:20})]}));
+    children.push(new Paragraph({alignment:AlignmentType.CENTER,spacing:{after:300},children:[new TextRun({text:escola.nome.toUpperCase(),bold:true,size:24,color:'1e40af'})]}));
+
+    if(tipo==='declaracao'){
+      children.push(new Paragraph({alignment:AlignmentType.CENTER,spacing:{before:300,after:300},children:[new TextRun({text:'DECLARAÇÃO',bold:true,size:32})]}));
+      children.push(new Paragraph({spacing:{after:200},children:[new TextRun({text:`Para os devidos efeitos, declara-se que ${al.nome}, portador(a) do BI nº ${al.bi||'_______'}, nascido(a) em ${formatDate(al.dataNascimento)}, natural de ${al.naturalidade||'_______'}, filho(a) de ${al.nomePai||'_______'} e de ${al.nomeMae||'_______'}, encontra-se matriculado(a) nesta instituição na ${al.classe||'_______'}, no ano lectivo de ${anoLetivo}.`,size:22})]}));
+    }else if(tipo==='boletim'){
+      children.push(new Paragraph({alignment:AlignmentType.CENTER,spacing:{before:200,after:200},children:[new TextRun({text:'BOLETIM DE NOTAS',bold:true,size:28})]}));
+      children.push(new Paragraph({children:[new TextRun({text:`Nome: ${al.nome}  |  Classe: ${al.classe||'-'}  |  Data Nasc.: ${formatDate(al.dataNascimento)}`,size:22})]}));
+      children.push(new Paragraph({spacing:{after:200},children:[new TextRun({text:`Pai: ${al.nomePai||'-'}  |  Mãe: ${al.nomeMae||'-'}`,size:22})]}));
+
+      const notasAluno=currentSchool.notas.filter(n=>n.alunoId===al.id&&n.anoLetivo===anoLetivo);
+      if(notasAluno.length>0){
+        const headerRow=new TableRow({children:['Disciplina','Tri','MAC','NPP','NPT','MT'].map(h=>new TableCell({children:[new Paragraph({children:[new TextRun({text:h,bold:true,size:18})]})]}))});
+        const dataRows=notasAluno.map(n=>new TableRow({children:[n.disciplina,n.trimestre,n.mac||'-',n.npp||'-',n.npt||'-',calcMT(n).toFixed(1)].map(v=>new TableCell({children:[new Paragraph({children:[new TextRun({text:String(v),size:18})]})]})) }));
+        children.push(new Table({rows:[headerRow,...dataRows],width:{size:100,type:WidthType.PERCENTAGE}}));
+      }
+    }else{
+      children.push(new Paragraph({alignment:AlignmentType.CENTER,spacing:{before:300,after:300},children:[new TextRun({text:'CERTIFICADO',bold:true,size:36})]}));
+      children.push(new Paragraph({children:[new TextRun({text:`Certifica-se que ${al.nome}, portador(a) do BI nº ${al.bi||'_______'}, nascido(a) em ${formatDate(al.dataNascimento)}, concluiu com aproveitamento a ${al.classe||'_______'} nesta instituição, no ano lectivo de ${anoLetivo}.`,size:22})]}));
+    }
+
+    children.push(new Paragraph({spacing:{before:400},children:[new TextRun({text:`${escola.municipio||'Local'}, ${new Date().toLocaleDateString('pt-AO')}`,size:22})]}));
+    children.push(new Paragraph({spacing:{before:400},children:[new TextRun({text:'_________________________________',size:22})]}));
+    children.push(new Paragraph({children:[new TextRun({text:'O(A) Director(a) Geral',size:22})]}));
+  });
+
+  const ddoc=new Document({sections:[{children}]});
+  Packer.toBlob(ddoc).then(blob=>{
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url;a.download=`${tipo}_${alunos.length===1?alunos[0].nome.replace(/\s+/g,'_'):'turma_completa'}.docx`;
+    a.click();URL.revokeObjectURL(url);
+    showToast('DOCX gerado com '+alunos.length+' documento(s)!','success');
+  });
+}
+
+// ============ MENSAGENS ============
+function renderMensagens(){
+  if(!currentSchool)return;
+  let html=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
+    <div><h2 style="font-size:22px;font-weight:700">Mensagens</h2></div>
+    <button class="btn btn-primary" onclick="modalMensagem()"><i class="fas fa-plus"></i> Nova</button>
+  </div>
+  <div style="display:grid;gap:12px">`;
+  const msgs=(currentSchool.mensagens||[]).filter(m=>m.destinatarioId===currentUser.id||m.remetenteId===currentUser.id||m.destinatarioGrupo===currentUser.perfil||m.destinatarioGrupo==='todos');
+  const sorted=[...msgs].sort((a,b)=>new Date(b.data)-new Date(a.data));
+  if(sorted.length===0)html+='<div class="card" style="text-align:center;padding:60px;color:#9ca3af"><i class="fas fa-envelope" style="font-size:48px"></i><p>Nenhuma mensagem</p></div>';
+  sorted.forEach(m=>{
+    const rem=currentSchool.users.find(u=>u.id===m.remetenteId);
+    const isRec=m.remetenteId!==currentUser.id;
+    html+=`<div class="card" style="border-left:4px solid ${isRec?'var(--primary)':'var(--secondary)'}">
+      <div style="display:flex;justify-content:space-between;align-items:start">
+        <div style="display:flex;align-items:center;gap:12px">
+          <img class="avatar" src="${rem?rem.foto||defaultAvatar():defaultAvatar()}">
+          <div><strong>${rem?rem.nome:'Sistema'}</strong> <span class="badge badge-${isRec?'blue':'green'}">${isRec?'Recebida':'Enviada'}</span><p style="font-size:12px;color:#9ca3af">${formatDate(m.data)}</p></div>
+        </div>
+      </div>
+      <h4 style="margin:12px 0 4px">${m.assunto||'Sem assunto'}</h4>
+      <p style="color:#6b7280">${m.mensagem||''}</p>
+    </div>`;
+  });
+  html+='</div>';
+  document.getElementById('pageContent').innerHTML=html;
+}
+
+function modalMensagem(){
+  const userOpts=currentSchool.users.filter(u=>u.id!==currentUser.id).map(u=>`<option value="${u.id}">${u.nome} (${PERFIS[u.perfil]})</option>`).join('');
+  const grupoOpts=Object.entries(PERFIS).filter(([k])=>k!=='admin_sistema').map(([k,v])=>`<option value="${k}">${v}</option>`).join('');
+
+  openModal(`<div class="modal-header"><h3>Nova Mensagem</h3><button onclick="closeModal()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div>
+  <div class="modal-body">
+    <div class="form-group"><label>Enviar para</label><select class="form-input" id="msgTipo" onchange="toggleMsgDest()"><option value="individual">Individual</option><option value="grupo">Grupo</option><option value="todos">Todos</option></select></div>
+    <div class="form-group" id="msgDestIndiv"><label>Destinatário</label><select class="form-input" id="msgDest"><option value="">Selecione</option>${userOpts}</select></div>
+    <div class="form-group" id="msgDestGrupo" style="display:none"><label>Grupo</label><select class="form-input" id="msgGrupo"><option value="">Selecione</option>${grupoOpts}</select></div>
+    <div class="form-group"><label>Assunto *</label><input class="form-input" id="msgAssunto"></div>
+    <div class="form-group"><label>Mensagem *</label><textarea class="form-input" id="msgTexto" rows="5"></textarea></div>
+    <button class="btn btn-primary" style="width:100%" onclick="enviarMensagem()"><i class="fas fa-paper-plane"></i> Enviar</button>
+  </div>`);
+}
+
+function toggleMsgDest(){
+  const tipo=document.getElementById('msgTipo').value;
+  document.getElementById('msgDestIndiv').style.display=tipo==='individual'?'block':'none';
+  document.getElementById('msgDestGrupo').style.display=tipo==='grupo'?'block':'none';
+}
+
+function enviarMensagem(){
+  const tipo=document.getElementById('msgTipo').value;
+  const assunto=document.getElementById('msgAssunto').value;
+  const mensagem=document.getElementById('msgTexto').value;
+  if(!assunto||!mensagem)return showToast('Preencha todos os campos!','error');
+
+  const msg={id:generateId(),remetenteId:currentUser.id,assunto,mensagem,data:new Date().toISOString()};
+  if(tipo==='individual'){
+    msg.destinatarioId=document.getElementById('msgDest').value;
+    if(!msg.destinatarioId)return showToast('Selecione o destinatário!','error');
+  }else if(tipo==='grupo'){
+    msg.destinatarioGrupo=document.getElementById('msgGrupo').value;
+    if(!msg.destinatarioGrupo)return showToast('Selecione o grupo!','error');
+  }else{
+    msg.destinatarioGrupo='todos';
+  }
+
+  currentSchool.mensagens.push(msg);
+  saveSystem();syncToFirebase();closeModal();showToast('Mensagem enviada!','success');renderMensagens();
+}
+
+// ============ COMUNICADOS ============
+function renderComunicados(){
+  if(!currentSchool)return;
+  let html=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
+    <div><h2 style="font-size:22px;font-weight:700">Comunicados</h2></div>
+    ${['director_geral','subdirector_pedagogico','subdirector_administrativo','secretaria'].includes(currentUser.perfil)?`<button class="btn btn-primary" onclick="modalComunicado()"><i class="fas fa-plus"></i> Novo</button>`:''}
+  </div>
+  <div style="display:grid;gap:16px">`;
+  const coms=[...(currentSchool.comunicados||[])].sort((a,b)=>new Date(b.data)-new Date(a.data));
+  if(coms.length===0)html+='<div class="card" style="text-align:center;padding:60px;color:#9ca3af">Nenhum comunicado</div>';
+  coms.forEach(c=>{
+    html+=`<div class="card">
+      <div style="display:flex;justify-content:space-between">
+        <div><h3>${c.titulo}</h3><span class="badge badge-blue">${c.destinatario||'Todos'}</span></div>
+        <div style="text-align:right"><p style="font-size:12px;color:#9ca3af">${formatDate(c.data)}</p><p style="font-size:12px;color:#6b7280">Por: ${c.autor||'Direcção'}</p></div>
+      </div>
+      <p style="margin-top:12px;color:#374151">${c.mensagem||''}</p>
+    </div>`;
+  });
+  html+='</div>';
+  document.getElementById('pageContent').innerHTML=html;
+}
+
+function modalComunicado(){
+  openModal(`<div class="modal-header"><h3>Novo Comunicado</h3><button onclick="closeModal()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button></div>
+  <div class="modal-body">
+    <div class="form-group"><label>Título *</label><input class="form-input" id="comTitulo"></div>
+    <div class="form-group"><label>Destinatários</label><select class="form-input" id="comDest"><option value="Todos">Todos</option>${Object.entries(PERFIS).filter(([k])=>k!=='admin_sistema').map(([k,v])=>`<option value="${v}">${v}</option>`).join('')}</select></div>
+    <div class="form-group"><label>Mensagem *</label><textarea class="form-input" id="comMsg" rows="6"></textarea></div>
+    <button class="btn btn-primary" style="width:100%" onclick="salvarComunicado()"><i class="fas fa-bullhorn"></i> Publicar</button>
+  </div>`);
+}
+
+function salvarComunicado(){
+  const titulo=document.getElementById('comTitulo').value;
+  const destinatario=document.getElementById('comDest').value;
+  const mensagem=document.getElementById('comMsg').value;
+  if(!titulo||!mensagem)return showToast('Preencha todos os campos!','error');
+  currentSchool.comunicados.push({id:generateId(),titulo,destinatario,mensagem,autor:currentUser.nome,remetenteId:currentUser.id,data:new Date().toISOString()});
+  saveSystem();syncToFirebase();closeModal();showToast('Comunicado publicado!','success');renderComunicados();
+}
+
+// ============ RELATÓRIOS ESCOLA ============
+function renderRelatorios(){
+  if(!currentSchool)return;
+  const s=currentSchool;
+  const totalAl=s.students.length;
+  const totalProfs=s.users.filter(u=>u.perfil==='professor').length;
+  const masc=s.students.filter(st=>st.genero==='Masculino').length;
+  const fem=s.students.filter(st=>st.genero==='Feminino').length;
+
+  let html=`<div style="margin-bottom:24px">
+    <h2 style="font-size:22px;font-weight:700">Relatórios</h2>
+    <p style="color:#64748b">Estatísticas e exportação de dados</p>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:24px">
+    <div class="stat-card" style="--c1:#3b82f6;--c2:#1d4ed8"><div style="font-size:28px;font-weight:800">${totalAl}</div><div>Alunos</div></div>
+    <div class="stat-card" style="--c1:#10b981;--c2:#059669"><div style="font-size:28px;font-weight:800">${totalProfs}</div><div>Professores</div></div>
+    <div class="stat-card" style="--c1:#ec4899;--c2:#be185d"><div style="font-size:28px;font-weight:800">${fem}</div><div>Feminino</div></div>
+    <div class="stat-card" style="--c1:#8b5cf6;--c2:#7c3aed"><div style="font-size:28px;font-weight:800">${masc}</div><div>Masculino</div></div>
+  </div>
+  <div class="card">
+    <h3 style="margin-bottom:16px">Exportar Relatórios</h3>
+    <div style="display:flex;gap:12px;flex-wrap:wrap">
+      <button class="btn btn-success" onclick="exportarEscolaXLS('alunos')"><i class="fas fa-file-excel"></i> Lista de Alunos (XLS)</button>
+      <button class="btn btn-success" onclick="exportarEscolaXLS('professores')"><i class="fas fa-file-excel"></i> Lista de Professores (XLS)</button>
+      <button class="btn btn-success" onclick="exportarEscolaXLS('notas')"><i class="fas fa-file-excel"></i> Pautas de Notas (XLS)</button>
+      <button class="btn btn-danger" onclick="exportarEscolaPDF()"><i class="fas fa-file-pdf"></i> Relatório Geral (PDF)</button>
+    </div>
+  </div>`;
+  document.getElementById('pageContent').innerHTML=html;
+}
+
+function exportarEscolaXLS(tipo){
+  if(!currentSchool)return;
+  let data=[];
+  if(tipo==='alunos'){
+    data=currentSchool.students.map((s,i)=>({'Nº':i+1,'Nome':s.nome,'Classe':s.classe||'','Género':s.genero||'','Data Nasc.':formatDate(s.dataNascimento),'BI':s.bi||'','Pai':s.nomePai||'','Mãe':s.nomeMae||'','Tel. Encarregado':s.telefoneEncarregado||''}));
+  }else if(tipo==='professores'){
+    data=currentSchool.users.filter(u=>u.perfil==='professor').map((p,i)=>({'Nº':i+1,'Nome':p.nome,'BI':p.bi||'','Telefone':p.telefone||'','Email':p.email||'','Habilitações':p.habilitacoes||'','Nº Agente':p.numAgente||''}));
+  }else{
+    data=currentSchool.notas.map(n=>{const al=currentSchool.students.find(s=>s.id===n.alunoId);return{'Aluno':al?al.nome:'','Classe':n.classe||'','Disciplina':n.disciplina,'Trimestre':n.trimestre,'MAC':n.mac||'','NPP':n.npp||'','NPT':n.npt||'','Média':calcMT(n).toFixed(1)};});
+  }
+  if(data.length===0)return showToast('Sem dados!','error');
+  const ws=XLSX.utils.json_to_sheet(data);
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,tipo);
+  XLSX.writeFile(wb,`${tipo}_${currentSchool.info.nome.replace(/\s+/g,'_')}.xlsx`);
+  showToast('XLS exportado!','success');
+}
+
+function exportarEscolaPDF(){
+  if(!currentSchool)return;
+  const{jsPDF}=window.jspdf;
+  const doc=new jsPDF();
+  const s=currentSchool;
+
+  doc.setFontSize(16);doc.setFont(undefined,'bold');
+  doc.text(s.info.nome.toUpperCase(),105,20,{align:'center'});
+  doc.setFontSize(12);doc.text('RELATÓRIO GERAL',105,28,{align:'center'});
+  doc.line(20,32,190,32);
+
+  let y=42;doc.setFontSize(11);doc.setFont(undefined,'normal');
+  doc.text(`Data: ${new Date().toLocaleDateString('pt-AO')}`,20,y);y+=8;
+  doc.text(`Total de Alunos: ${s.students.length}`,20,y);y+=6;
+  doc.text(`Masculino: ${s.students.filter(st=>st.genero==='Masculino').length}  |  Feminino: ${s.students.filter(st=>st.genero==='Feminino').length}`,20,y);y+=6;
+  doc.text(`Total de Professores: ${s.users.filter(u=>u.perfil==='professor').length}`,20,y);y+=6;
+  doc.text(`Total de Turmas: ${s.turmas.length}`,20,y);y+=6;
+  doc.text(`Total de Classes: ${s.classes.length}`,20,y);y+=12;
+
+  // Alunos por classe
+  doc.setFont(undefined,'bold');doc.text('Distribuição por Classe:',20,y);y+=7;
+  doc.setFont(undefined,'normal');
+  const classDist={};
+  s.students.forEach(st=>{const cl=st.classe||'Sem classe';classDist[cl]=(classDist[cl]||0)+1;});
+  Object.entries(classDist).forEach(([cl,ct])=>{doc.text(`  ${cl}: ${ct} alunos`,25,y);y+=5;});
+
+  doc.save(`relatorio_${s.info.nome.replace(/\s+/g,'_')}.pdf`);
+  showToast('PDF gerado!','success');
+}
+
+// ============ BACKUP ESCOLA ============
+function renderBackup(){
+  if(!currentSchool)return;
+  let html=`<div style="margin-bottom:24px">
+    <h2 style="font-size:22px;font-weight:700">Backup</h2>
+    <p style="color:#64748b">Exportar dados da escola</p>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px">
+    <div class="card" style="text-align:center">
+      <div style="width:64px;height:64px;background:#fef3c7;border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px"><i class="fas fa-file-excel" style="font-size:28px;color:#d97706"></i></div>
+      <h3>Backup XLS</h3>
+      <p style="color:#6b7280;font-size:13px;margin:8px 0">Exportar todos os dados em Excel</p>
+      <button class="btn btn-warning" onclick="backupEscolaXLS()"><i class="fas fa-download"></i> Exportar</button>
+    </div>
+    <div class="card" style="text-align:center">
+      <div style="width:64px;height:64px;background:#ede9fe;border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px"><i class="fas fa-file-archive" style="font-size:28px;color:#7c3aed"></i></div>
+      <h3>Backup JSON</h3>
+      <p style="color:#6b7280;font-size:13px;margin:8px 0">Exportar dados da escola em JSON</p>
+      <button class="btn btn-outline" onclick="backupEscolaJSON()"><i class="fas fa-download"></i> Exportar</button>
+    </div>
+  </div>`;
+  document.getElementById('pageContent').innerHTML=html;
+}
+
+function backupEscolaXLS(){
+  if(!currentSchool)return;
+  const wb=XLSX.utils.book_new();
+  const s=currentSchool;
+
+  if(s.students.length>0){
+    const data=s.students.map((st,i)=>({'Nº':i+1,'Nome':st.nome,'Classe':st.classe||'','Género':st.genero||'','Data Nasc.':formatDate(st.dataNascimento),'BI':st.bi||'','Pai':st.nomePai||'','Mãe':st.nomeMae||''}));
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(data),'Alunos');
+  }
+  const profs=s.users.filter(u=>u.perfil==='professor');
+  if(profs.length>0){
+    const data=profs.map((p,i)=>({'Nº':i+1,'Nome':p.nome,'BI':p.bi||'','Telefone':p.telefone||'','Email':p.email||''}));
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(data),'Professores');
+  }
+  if(s.notas.length>0){
+    const data=s.notas.map(n=>{const al=s.students.find(st=>st.id===n.alunoId);return{'Aluno':al?al.nome:'','Disciplina':n.disciplina,'Trimestre':n.trimestre,'MAC':n.mac||'','NPP':n.npp||'','NPT':n.npt||'','Média':calcMT(n).toFixed(1)};});
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(data),'Notas');
+  }
+
+  XLSX.writeFile(wb,`backup_${s.info.nome.replace(/\s+/g,'_')}_${new Date().toISOString().split('T')[0]}.xlsx`);
+  showToast('Backup XLS exportado!','success');
+}
+
+function backupEscolaJSON(){
+  if(!currentSchool)return;
+  const json=JSON.stringify(currentSchool,null,2);
+  const blob=new Blob([json],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;a.download=`backup_${currentSchool.info.nome.replace(/\s+/g,'_')}_${new Date().toISOString().split('T')[0]}.json`;
+  a.click();URL.revokeObjectURL(url);
+  showToast('Backup JSON exportado!','success');
+}
+
+// ============ PERFIL ============
+function renderPerfil(){
+  const u=currentUser;
+  let html=`<div style="max-width:800px;margin:0 auto">
+    <div class="card" style="text-align:center;margin-bottom:24px">
+      <img class="avatar avatar-xl" src="${u.foto||defaultAvatar()}" style="margin-bottom:16px">
+      <h2>${u.nome}</h2>
+      <span class="badge badge-blue">${PERFIS[u.perfil]}</span>
+    </div>
+    <div class="card" style="margin-bottom:24px">
+      <h3 style="margin-bottom:16px"><i class="fas fa-user" style="color:var(--primary)"></i> Informações Pessoais</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div><label style="color:#6b7280;font-size:13px">Nome</label><p style="font-weight:500">${u.nome}</p></div>
+        <div><label style="color:#6b7280;font-size:13px">BI</label><p style="font-weight:500">${u.bi||'-'}</p></div>
+        <div><label style="color:#6b7280;font-size:13px">Data Nasc.</label><p style="font-weight:500">${formatDate(u.dataNascimento)} (${calcAge(u.dataNascimento)} anos)</p></div>
+        <div><label style="color:#6b7280;font-size:13px">Telefone</label><p style="font-weight:500">${u.telefone||'-'}</p></div>
+        <div><label style="color:#6b7280;font-size:13px">Email</label><p style="font-weight:500">${u.email||'-'}</p></div>
+        <div><label style="color:#6b7280;font-size:13px">Habilitações</label><p style="font-weight:500">${u.habilitacoes||'-'}</p></div>
+      </div>
+    </div>
+    <div class="card">
+      <h3 style="margin-bottom:16px"><i class="fas fa-key" style="color:var(--accent)"></i> Alterar Senha</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+        <div class="form-group"><label>Senha Actual</label><input type="password" class="form-input" id="pSenhaAtual"></div>
+        <div class="form-group"><label>Nova Senha</label><input type="password" class="form-input" id="pNovaSenha"></div>
+        <div class="form-group"><label>Confirmar</label><input type="password" class="form-input" id="pConfSenha"></div>
+      </div>
+      <button class="btn btn-primary" onclick="alterarSenha()"><i class="fas fa-save"></i> Alterar Senha</button>
+    </div>
+  </div>`;
+  document.getElementById('pageContent').innerHTML=html;
+}
+
+function alterarSenha(){
+  const atual=document.getElementById('pSenhaAtual').value;
+  const nova=document.getElementById('pNovaSenha').value;
+  const conf=document.getElementById('pConfSenha').value;
+  if(!atual||!nova||!conf)return showToast('Preencha todos os campos!','error');
+  if(atob(currentUser.senha)!==atual)return showToast('Senha actual incorrecta!','error');
+  if(nova!==conf)return showToast('As senhas não coincidem!','error');
+  if(nova.length<4)return showToast('Mínimo 4 caracteres!','error');
+
+  currentUser.senha=btoa(nova);
+
+  if(currentUser.perfil==='admin_sistema'){
+    SYSTEM.admin.senha=btoa(nova);
+  }else if(currentSchool){
+    const u=currentSchool.users.find(x=>x.id===currentUser.id);
+    if(u)u.senha=btoa(nova);
+  }
+
+  saveSystem();syncToFirebase();
+  showToast('Senha alterada!','success');
+  document.getElementById('pSenhaAtual').value='';
+  document.getElementById('pNovaSenha').value='';
+  document.getElementById('pConfSenha').value='';
+}
+
+function showProfile(){navigateTo('perfil');}
+
+// ============ HELPERS ============
+function deleteSchoolItem(collection,id){
+  if(!confirm('Apagar este item?'))return;
+  if(!currentSchool)return;
+  currentSchool[collection]=currentSchool[collection].filter(x=>x.id!==id);
+  saveSystem();syncToFirebase();showToast('Item apagado!','info');navigateTo(currentPage);
+}
+
+// ============ MODAL CLICK OUTSIDE ============
+document.getElementById('modal').addEventListener('click',function(e){if(e.target===this)closeModal();});
+
+// ============ AUTO SYNC ============
+setInterval(()=>{if(isOnline&&currentUser)syncToFirebase().catch(()=>{});},300000);
+
+// ============ INIT ============
+window.addEventListener('DOMContentLoaded',init);
+</script>
+</body>
+</html>
