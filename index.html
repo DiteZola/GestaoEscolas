@@ -226,18 +226,50 @@ table.data-table tr:hover{background:#f8fafc}
 
 <script>
 // ============ FIREBASE ============
-const firebaseConfig={apiKey:"AIzaSyA4H1zY37rP2RKYzhqTfJrwfaZzFZF8bH4",authDomain:"gestaoescolas-7ed29.firebaseapp.com",projectId:"gestaoescolas-7ed29",storageBucket:"gestaoescolas-7ed29.firebasestorage.app",messagingSenderId:"206339174100",appId:"1:206339174100:web:a621efb2a3059243ffd541"};
-firebase.initializeApp(firebaseConfig);
-const db=firebase.firestore();
+const firebaseConfig={
+  apiKey:"AIzaSyA4H1zY37rP2RKYzhqTfJrwfaZzFZF8bH4",
+  authDomain:"gestaoescolas-7ed29.firebaseapp.com",
+  projectId:"gestaoescolas-7ed29",
+  storageBucket:"gestaoescolas-7ed29.firebasestorage.app",
+  messagingSenderId:"206339174100",
+  appId:"1:206339174100:web:a621efb2a3059243ffd541"
+};
 
-// Habilitar persistência offline
-db.enablePersistence({synchronizeTabs:true}).catch(err=>{
-  console.log('Persistência offline não disponível:',err.code);
+// Inicializar Firebase
+const app = firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+
+// Configurar Firestore para melhor performance
+db.settings({
+  cacheSizeBytes: firebase.firestore.CACHE_SIZE_UNLIMITED
 });
 
-let unsubscribeListener=null;
-let isSyncing=false;
-let lastSyncTime=0;
+// Tentar habilitar persistência
+db.enablePersistence({synchronizeTabs: true}).catch(err => {
+  if (err.code === 'failed-precondition') {
+    console.warn('Múltiplas abas abertas, persistência desabilitada');
+  } else if (err.code === 'unimplemented') {
+    console.warn('Navegador não suporta persistência');
+  }
+});
+
+// Referência ao documento principal
+const DOC_REF = db.collection('gestao_escolar').doc('dados_sistema');
+
+let unsubscribeListener = null;
+let isSyncing = false;
+let lastLocalVersion = 0;
+
+// Log para debug
+function logSync(msg, type = 'info') {
+  const styles = {
+    info: 'color: #3b82f6',
+    success: 'color: #10b981',
+    error: 'color: #ef4444',
+    warning: 'color: #f59e0b'
+  };
+  console.log(`%c[SYNC] ${msg}`, styles[type] || styles.info);
+}
 
 // ============ GLOBAL STATE ============
 let SYSTEM={
@@ -285,23 +317,31 @@ function createSchoolData(schoolInfo){
 }
 
 // ============ INIT ============
-async function init(){
+async function init() {
+  logSync('=== INICIANDO SISTEMA ===', 'info');
+  logSync('Online: ' + isOnline, 'info');
+  
   populateProvincias();
   checkSync();
   
-  // Carregar dados do Firebase primeiro (se online), senão do localStorage
-  await loadFromFirebaseFirst();
+  // Carregar dados
+  await carregarDados();
   
   // Iniciar listener em tempo real
-  if(isOnline){
-    startRealtimeListener();
+  if (isOnline) {
+    iniciarListenerTempoReal();
   }
   
-  if(!SYSTEM.config.setupDone||!SYSTEM.admin){
+  // Verificar se precisa configuração inicial
+  if (!SYSTEM.config.setupDone || !SYSTEM.admin) {
+    logSync('Sistema não configurado - mostrando setup', 'info');
     showScreen('setupAdminScreen');
-  }else{
+  } else {
+    logSync('Sistema configurado - mostrando login', 'info');
     showScreen('loginScreen');
   }
+  
+  logSync('=== SISTEMA INICIADO ===', 'success');
 }
 
 function showScreen(id){
@@ -319,223 +359,352 @@ function populateProvincias(){
 }
 
 // ============ STORAGE ============
-function saveSystem(syncNow=true){
-  try{
-    // Atualizar versão para controle de sincronização
-    SYSTEM.version=Date.now();
-    localStorage.setItem('sge_system',JSON.stringify(SYSTEM));
+function saveSystem(syncNow = true) {
+  try {
+    SYSTEM.version = Date.now();
+    SYSTEM.lastModified = new Date().toISOString();
+    lastLocalVersion = SYSTEM.version;
     
-    if(syncNow&&isOnline&&!isSyncing){
-      // Usar debounce para evitar muitas chamadas
+    localStorage.setItem('sge_system', JSON.stringify(SYSTEM));
+    logSync('Dados salvos localmente', 'success');
+    
+    if (syncNow && isOnline && !isSyncing) {
       clearTimeout(window.syncTimeout);
-      window.syncTimeout=setTimeout(()=>{
-        syncToFirebase();
-      },500);
+      window.syncTimeout = setTimeout(() => {
+        enviarParaFirebase();
+      }, 800);
     }
-  }catch(e){console.error(e);}
+  } catch(e) {
+    console.error('Erro ao salvar:', e);
+  }
 }
 
-function loadSystem(){
-  try{
-    const d=localStorage.getItem('sge_system');
-    if(d)SYSTEM=JSON.parse(d);
-  }catch(e){console.error(e);}
+function loadSystem() {
+  try {
+    const d = localStorage.getItem('sge_system');
+    if (d) {
+      SYSTEM = JSON.parse(d);
+      lastLocalVersion = SYSTEM.version || 0;
+      logSync('Dados carregados do localStorage', 'info');
+    }
+  } catch(e) {
+    console.error('Erro ao carregar localStorage:', e);
+  }
 }
 
-// Carregar do Firebase primeiro, depois do localStorage como fallback
-async function loadFromFirebaseFirst(){
-  if(!isOnline){
-    loadSystem();
+// Carregar dados - primeiro tenta Firebase, depois localStorage
+async function carregarDados() {
+  logSync('Iniciando carregamento de dados...', 'info');
+  
+  // Primeiro carregar do localStorage para ter algo rápido
+  loadSystem();
+  
+  if (!isOnline) {
+    logSync('Offline - usando dados locais', 'warning');
     return;
   }
   
-  try{
-    showToast('A carregar dados...','info');
-    const doc=await db.collection('gestao_escolar').doc('sistema_principal').get();
+  try {
+    showToast('A carregar dados do servidor...', 'info');
     
-    if(doc.exists){
-      const remoteData=doc.data();
-      if(remoteData.data){
-        SYSTEM=JSON.parse(remoteData.data);
-        localStorage.setItem('sge_system',JSON.stringify(SYSTEM));
-        console.log('Dados carregados do Firebase');
+    const doc = await DOC_REF.get();
+    
+    if (doc.exists) {
+      const dados = doc.data();
+      logSync(`Documento encontrado no Firebase. Versão remota: ${dados.version}`, 'success');
+      
+      if (dados.sistema) {
+        const sistemaRemoto = JSON.parse(dados.sistema);
+        const versaoRemota = dados.version || 0;
+        const versaoLocal = SYSTEM.version || 0;
+        
+        logSync(`Versão local: ${versaoLocal}, Versão remota: ${versaoRemota}`, 'info');
+        
+        // Usar dados mais recentes
+        if (versaoRemota >= versaoLocal) {
+          SYSTEM = sistemaRemoto;
+          SYSTEM.version = versaoRemota;
+          lastLocalVersion = versaoRemota;
+          localStorage.setItem('sge_system', JSON.stringify(SYSTEM));
+          logSync('Dados do Firebase aplicados (mais recentes)', 'success');
+          showToast('Dados sincronizados do servidor!', 'success');
+        } else {
+          logSync('Dados locais são mais recentes, enviando para Firebase...', 'info');
+          await enviarParaFirebase();
+        }
       }
-    }else{
-      // Se não existe no Firebase, carregar do localStorage
-      loadSystem();
-      // E salvar no Firebase se tiver dados
-      if(SYSTEM.config.setupDone){
-        await syncToFirebase();
+    } else {
+      logSync('Nenhum dado no Firebase', 'warning');
+      
+      // Se temos dados locais, enviar para Firebase
+      if (SYSTEM.config && SYSTEM.config.setupDone) {
+        logSync('Enviando dados locais para Firebase...', 'info');
+        await enviarParaFirebase();
       }
     }
-  }catch(e){
-    console.error('Erro ao carregar do Firebase:',e);
-    loadSystem();
+  } catch(e) {
+    logSync('Erro ao carregar do Firebase: ' + e.message, 'error');
+    console.error(e);
+    showToast('Erro de conexão - usando dados locais', 'warning');
   }
 }
 
 // ============ FIREBASE SYNC ============
-let isOnline=navigator.onLine;
+let isOnline = navigator.onLine;
 
-window.addEventListener('online',()=>{
-  isOnline=true;
+window.addEventListener('online', () => {
+  logSync('Conexão restaurada!', 'success');
+  isOnline = true;
   checkSync();
-  syncToFirebase();
-  startRealtimeListener();
+  enviarParaFirebase();
+  iniciarListenerTempoReal();
 });
 
-window.addEventListener('offline',()=>{
-  isOnline=false;
+window.addEventListener('offline', () => {
+  logSync('Conexão perdida!', 'warning');
+  isOnline = false;
   checkSync();
-  if(unsubscribeListener){
-    unsubscribeListener();
-    unsubscribeListener=null;
-  }
+  pararListener();
 });
 
-function checkSync(){
-  const dot=document.getElementById('syncDot');
-  const txt=document.getElementById('syncText');
-  if(dot)dot.className='sync-indicator '+(isOnline?'sync-online':'sync-offline');
-  if(txt)txt.textContent=isOnline?'Online':'Offline';
+function checkSync() {
+  const dot = document.getElementById('syncDot');
+  const txt = document.getElementById('syncText');
+  if (dot) dot.className = 'sync-indicator ' + (isOnline ? 'sync-online' : 'sync-offline');
+  if (txt) txt.textContent = isOnline ? 'Online' : 'Offline';
 }
 
-// Sincronizar para o Firebase
-async function syncToFirebase(){
-  if(!isOnline||isSyncing)return;
+function updateSyncStatus(status) {
+  const txt = document.getElementById('syncText');
+  if (txt) {
+    txt.textContent = status;
+    setTimeout(() => {
+      if (txt) txt.textContent = isOnline ? 'Online' : 'Offline';
+    }, 3000);
+  }
+}
+
+// ========== ENVIAR PARA FIREBASE ==========
+async function enviarParaFirebase() {
+  if (!isOnline) {
+    logSync('Sem conexão - dados salvos apenas localmente', 'warning');
+    return false;
+  }
   
-  const now=Date.now();
-  if(now-lastSyncTime<2000)return; // Evitar sync muito frequente
+  if (isSyncing) {
+    logSync('Sincronização já em andamento...', 'info');
+    return false;
+  }
   
-  isSyncing=true;
-  lastSyncTime=now;
+  isSyncing = true;
+  updateSyncStatus('A sincronizar...');
   
-  try{
-    const syncData={
-      data:JSON.stringify(SYSTEM),
-      lastSync:firebase.firestore.FieldValue.serverTimestamp(),
-      lastSyncISO:new Date().toISOString(),
-      version:Date.now()
+  try {
+    const versao = Date.now();
+    SYSTEM.version = versao;
+    lastLocalVersion = versao;
+    
+    const dadosParaSalvar = {
+      sistema: JSON.stringify(SYSTEM),
+      version: versao,
+      ultimaAtualizacao: firebase.firestore.FieldValue.serverTimestamp(),
+      ultimaAtualizacaoISO: new Date().toISOString(),
+      totalEscolas: SYSTEM.schools ? SYSTEM.schools.length : 0,
+      totalAlunos: SYSTEM.schools ? SYSTEM.schools.reduce((t, s) => t + (s.students ? s.students.length : 0), 0) : 0
     };
     
-    await db.collection('gestao_escolar').doc('sistema_principal').set(syncData,{merge:true});
+    logSync('Enviando dados para Firebase...', 'info');
     
-    console.log('✅ Dados sincronizados com Firebase');
-    updateSyncStatus('Sincronizado');
-  }catch(e){
-    console.error('❌ Erro ao sincronizar:',e);
-    updateSyncStatus('Erro sync');
-  }finally{
-    isSyncing=false;
+    await DOC_REF.set(dadosParaSalvar);
+    
+    // Salvar localmente também
+    localStorage.setItem('sge_system', JSON.stringify(SYSTEM));
+    
+    logSync('✅ Dados enviados com sucesso! Versão: ' + versao, 'success');
+    updateSyncStatus('Sincronizado!');
+    showToast('Dados sincronizados!', 'success');
+    
+    return true;
+  } catch(e) {
+    logSync('❌ Erro ao enviar: ' + e.message, 'error');
+    console.error('Erro completo:', e);
+    updateSyncStatus('Erro!');
+    showToast('Erro ao sincronizar: ' + e.message, 'error');
+    return false;
+  } finally {
+    isSyncing = false;
   }
 }
 
-// Listener em tempo real
-function startRealtimeListener(){
-  if(unsubscribeListener||!isOnline)return;
-  
-  console.log('🔄 Iniciando listener em tempo real...');
-  
-  unsubscribeListener=db.collection('gestao_escolar').doc('sistema_principal')
-    .onSnapshot((doc)=>{
-      if(doc.exists&&!isSyncing){
-        const remoteData=doc.data();
-        const remoteVersion=remoteData.version||0;
-        const localVersion=SYSTEM.version||0;
-        
-        // Só atualizar se a versão remota for mais recente
-        if(remoteVersion>localVersion&&remoteData.data){
-          try{
-            const newData=JSON.parse(remoteData.data);
-            newData.version=remoteVersion;
-            SYSTEM=newData;
-            localStorage.setItem('sge_system',JSON.stringify(SYSTEM));
-            
-            console.log('📥 Dados atualizados do Firebase em tempo real');
-            updateSyncStatus('Atualizado');
-            
-            // Atualizar a página atual se o usuário estiver logado
-            if(currentUser&&currentPage){
-              // Atualizar referências
-              if(currentSchool){
-                currentSchool=SYSTEM.schools.find(s=>s.id===currentSchool.id);
-              }
-              if(currentUser.perfil!=='admin_sistema'&&currentSchool){
-                currentUser=currentSchool.users.find(u=>u.id===currentUser.id)||currentUser;
-              }
-              
-              // Re-renderizar a página atual
-              navigateTo(currentPage);
-            }
-          }catch(e){
-            console.error('Erro ao processar dados remotos:',e);
-          }
-        }
-      }
-    },(error)=>{
-      console.error('Erro no listener:',error);
-      updateSyncStatus('Erro');
-    });
-}
-
-function updateSyncStatus(status){
-  const txt=document.getElementById('syncText');
-  if(txt){
-    txt.textContent=status;
-    setTimeout(()=>{
-      if(txt)txt.textContent=isOnline?'Online':'Offline';
-    },2000);
+// ========== BAIXAR DO FIREBASE ==========
+async function baixarDoFirebase() {
+  if (!isOnline) {
+    showToast('Sem conexão à internet!', 'error');
+    return false;
   }
-}
-
-// Sincronizar do Firebase manualmente
-async function syncFromFirebase(){
-  if(!isOnline)return showToast('Sem conexão à internet!','error');
   
-  try{
-    showToast('A sincronizar...','info');
-    const doc=await db.collection('gestao_escolar').doc('sistema_principal').get();
+  try {
+    showToast('A baixar dados do servidor...', 'info');
+    logSync('Baixando dados do Firebase...', 'info');
     
-    if(doc.exists&&doc.data().data){
-      SYSTEM=JSON.parse(doc.data().data);
-      SYSTEM.version=doc.data().version||Date.now();
-      localStorage.setItem('sge_system',JSON.stringify(SYSTEM));
+    const doc = await DOC_REF.get();
+    
+    if (doc.exists && doc.data().sistema) {
+      const dados = doc.data();
+      SYSTEM = JSON.parse(dados.sistema);
+      SYSTEM.version = dados.version || Date.now();
+      lastLocalVersion = SYSTEM.version;
+      
+      localStorage.setItem('sge_system', JSON.stringify(SYSTEM));
       
       // Atualizar referências
-      if(currentSchool){
-        currentSchool=SYSTEM.schools.find(s=>s.id===currentSchool.id);
+      if (currentSchool) {
+        currentSchool = SYSTEM.schools.find(s => s.id === currentSchool.id);
+      }
+      if (currentUser && currentUser.perfil !== 'admin_sistema' && currentSchool) {
+        currentUser = currentSchool.users.find(u => u.id === currentUser.id) || currentUser;
       }
       
-      showToast('Dados restaurados com sucesso!','success');
-      navigateTo(currentPage);
-    }else{
-      showToast('Nenhum dado encontrado no servidor','info');
+      logSync('✅ Dados baixados! Versão: ' + SYSTEM.version, 'success');
+      showToast('Dados restaurados com sucesso!', 'success');
+      
+      if (currentPage) navigateTo(currentPage);
+      return true;
+    } else {
+      logSync('Nenhum dado encontrado no Firebase', 'warning');
+      showToast('Nenhum dado encontrado no servidor', 'info');
+      return false;
     }
-  }catch(e){
-    console.error('Erro ao restaurar:',e);
-    showToast('Erro ao restaurar: '+e.message,'error');
+  } catch(e) {
+    logSync('❌ Erro ao baixar: ' + e.message, 'error');
+    showToast('Erro: ' + e.message, 'error');
+    return false;
   }
 }
 
-// Forçar upload para Firebase
-async function forceUploadToFirebase(){
-  if(!isOnline)return showToast('Sem conexão!','error');
+// Aliases para compatibilidade
+async function syncToFirebase() { return await enviarParaFirebase(); }
+async function syncFromFirebase() { return await baixarDoFirebase(); }
+async function forceUploadToFirebase() { return await enviarParaFirebase(); }
+
+// ========== LISTENER EM TEMPO REAL ==========
+function iniciarListenerTempoReal() {
+  if (unsubscribeListener) {
+    logSync('Listener já está ativo', 'info');
+    return;
+  }
   
-  isSyncing=true;
-  try{
-    SYSTEM.version=Date.now();
-    await db.collection('gestao_escolar').doc('sistema_principal').set({
-      data:JSON.stringify(SYSTEM),
-      lastSync:firebase.firestore.FieldValue.serverTimestamp(),
-      lastSyncISO:new Date().toISOString(),
-      version:SYSTEM.version
+  if (!isOnline) {
+    logSync('Sem conexão - listener não iniciado', 'warning');
+    return;
+  }
+  
+  logSync('Iniciando listener em tempo real...', 'info');
+  
+  unsubscribeListener = DOC_REF.onSnapshot(
+    (doc) => {
+      if (!doc.exists) {
+        logSync('Documento não existe no Firebase', 'warning');
+        return;
+      }
+      
+      if (isSyncing) {
+        logSync('Ignorando update (sync em andamento)', 'info');
+        return;
+      }
+      
+      const dados = doc.data();
+      const versaoRemota = dados.version || 0;
+      
+      logSync(`Recebido update. Versão remota: ${versaoRemota}, Local: ${lastLocalVersion}`, 'info');
+      
+      // Só atualizar se a versão remota for mais recente
+      if (versaoRemota > lastLocalVersion && dados.sistema) {
+        try {
+          logSync('Aplicando dados mais recentes do Firebase...', 'info');
+          
+          const novosDados = JSON.parse(dados.sistema);
+          novosDados.version = versaoRemota;
+          SYSTEM = novosDados;
+          lastLocalVersion = versaoRemota;
+          
+          localStorage.setItem('sge_system', JSON.stringify(SYSTEM));
+          
+          // Atualizar referências
+          if (currentSchool) {
+            currentSchool = SYSTEM.schools.find(s => s.id === currentSchool.id);
+          }
+          if (currentUser && currentUser.perfil !== 'admin_sistema' && currentSchool) {
+            currentUser = currentSchool.users.find(u => u.id === currentUser.id) || currentUser;
+          }
+          
+          updateSyncStatus('Atualizado!');
+          logSync('✅ Dados atualizados em tempo real!', 'success');
+          
+          // Re-renderizar página atual
+          if (currentUser && currentPage) {
+            navigateTo(currentPage);
+          }
+        } catch(e) {
+          logSync('Erro ao processar dados: ' + e.message, 'error');
+        }
+      }
+    },
+    (error) => {
+      logSync('Erro no listener: ' + error.message, 'error');
+      console.error('Erro listener:', error);
+      pararListener();
+      
+      // Tentar reconectar após 5 segundos
+      setTimeout(() => {
+        if (isOnline) iniciarListenerTempoReal();
+      }, 5000);
+    }
+  );
+  
+  logSync('Listener iniciado com sucesso!', 'success');
+}
+
+function pararListener() {
+  if (unsubscribeListener) {
+    unsubscribeListener();
+    unsubscribeListener = null;
+    logSync('Listener parado', 'info');
+  }
+}
+
+// ========== TESTE DE CONEXÃO ==========
+async function testarConexaoFirebase() {
+  try {
+    showToast('Testando conexão...', 'info');
+    logSync('Testando conexão com Firebase...', 'info');
+    
+    // Tentar escrever um documento de teste
+    const testeRef = db.collection('gestao_escolar').doc('teste_conexao');
+    await testeRef.set({
+      teste: true,
+      timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+      data: new Date().toISOString()
     });
-    localStorage.setItem('sge_system',JSON.stringify(SYSTEM));
-    showToast('Dados enviados para a nuvem!','success');
-  }catch(e){
-    showToast('Erro: '+e.message,'error');
-  }finally{
-    isSyncing=false;
+    
+    // Tentar ler
+    const doc = await testeRef.get();
+    
+    if (doc.exists) {
+      logSync('✅ Conexão OK! Firebase está funcionando.', 'success');
+      showToast('✅ Conexão com Firebase OK!', 'success');
+      
+      // Limpar documento de teste
+      await testeRef.delete();
+      return true;
+    }
+  } catch(e) {
+    logSync('❌ Erro de conexão: ' + e.message, 'error');
+    showToast('❌ Erro: ' + e.message, 'error');
+    
+    // Mostrar instruções
+    alert('ERRO DE CONEXÃO COM FIREBASE!\n\nPossíveis causas:\n1. Regras do Firestore não configuradas\n2. Sem conexão à internet\n3. Projeto Firebase incorreto\n\nVá para: Firebase Console → Firestore → Regras\nE cole:\n\nrules_version = \'2\';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    match /{document=**} {\n      allow read, write: if true;\n    }\n  }\n}');
+    return false;
   }
 }
 
@@ -1233,14 +1402,26 @@ function renderAdminBackup(){
       <pre style="color:#e2e8f0;font-family:monospace;font-size:13px;margin:0;white-space:pre-wrap">rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Permitir leitura e escrita na colecção gestao_escolar
-    match /gestao_escolar/{document=**} {
+    match /{document=**} {
       allow read, write: if true;
     }
   }
 }</pre>
     </div>
     <button class="btn btn-outline" style="margin-top:12px" onclick="copyFirebaseRules()"><i class="fas fa-copy"></i> Copiar Regras</button>
+    <button class="btn btn-primary" style="margin-top:12px;margin-left:8px" onclick="testarConexaoFirebase()"><i class="fas fa-plug"></i> Testar Conexão</button>
+  </div>
+  
+  <div class="card" style="margin-top:24px;background:#fef3c7;border:2px solid #f59e0b">
+    <h3 style="color:#92400e;margin-bottom:12px"><i class="fas fa-exclamation-triangle"></i> IMPORTANTE - Configure as Regras!</h3>
+    <p style="color:#92400e;margin-bottom:12px">Para o sistema funcionar corretamente, você DEVE configurar as regras do Firestore:</p>
+    <ol style="color:#92400e;margin-left:20px;line-height:1.8">
+      <li>Acesse: <a href="https://console.firebase.google.com/project/gestaoescolas-7ed29/firestore/rules" target="_blank" style="color:#1e40af;font-weight:bold">Firebase Console - Regras</a></li>
+      <li>Apague todo o conteúdo existente</li>
+      <li>Cole as regras mostradas acima</li>
+      <li>Clique no botão "Publicar"</li>
+      <li>Volte aqui e clique em "Testar Conexão"</li>
+    </ol>
   </div>`;
   
   document.getElementById('pageContent').innerHTML=html;
@@ -1250,15 +1431,22 @@ function copyFirebaseRules(){
   const rules=`rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /gestao_escolar/{document=**} {
+    match /{document=**} {
       allow read, write: if true;
     }
   }
 }`;
   navigator.clipboard.writeText(rules).then(()=>{
-    showToast('Regras copiadas!','success');
+    showToast('Regras copiadas para a área de transferência!','success');
   }).catch(()=>{
-    showToast('Erro ao copiar','error');
+    // Fallback para navegadores antigos
+    const textarea = document.createElement('textarea');
+    textarea.value = rules;
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand('copy');
+    document.body.removeChild(textarea);
+    showToast('Regras copiadas!','success');
   });
 }
 
@@ -2845,17 +3033,18 @@ function deleteSchoolItem(collection,id){
 document.getElementById('modal').addEventListener('click',function(e){if(e.target===this)closeModal();});
 
 // ============ VERIFICAR CONEXÃO PERIODICAMENTE ============
-setInterval(()=>{
-  const wasOnline=isOnline;
-  isOnline=navigator.onLine;
+setInterval(() => {
+  const wasOnline = isOnline;
+  isOnline = navigator.onLine;
   
-  if(isOnline&&!wasOnline){
+  if (isOnline && !wasOnline) {
     // Reconectou - reiniciar listener
-    startRealtimeListener();
-    syncToFirebase();
+    logSync('Reconectado! Sincronizando...', 'success');
+    iniciarListenerTempoReal();
+    enviarParaFirebase();
   }
   checkSync();
-},10000);
+}, 10000);
 
 // ============ INIT ============
 window.addEventListener('DOMContentLoaded',init);
