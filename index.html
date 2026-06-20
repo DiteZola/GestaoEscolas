@@ -16722,5 +16722,1100 @@ console.log('  ✓ Pauta Anual: Presidente + 1°Vogal + 2°Vogal + Subdir.Ped + 
 console.log('  ✓ Pauta Trimestral: Subdir.Ped + Secretário + Director');
 console.log('  ✓ Insígnia PNG com fundo transparente');
 </script>
+<script type="module">
+// ============================================================
+// CORREÇÕES: LOGIN SEGURO, INSÍGNIA, PASSES, CERTIFICADOS,
+// DATA DOCUMENTOS, RELATÓRIO COMPLETO
+// ============================================================
+
+// ============ FIX 1: LOGIN SEGURO - Internet lenta/instável ============
+window.initSystem = async function() {
+  showLoading(true);
+  const loginTimeout = setTimeout(() => {
+    showLoading(false);
+    showLoginScreen();
+    console.warn('Timeout: mostrando login por segurança');
+  }, 8000);
+
+  try {
+    const hasSA = await Promise.race([
+      DB.checkSuperAdmin(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 6000))
+    ]);
+
+    clearTimeout(loginTimeout);
+
+    if (!hasSA) {
+      showLoading(false);
+      showSetupScreen();
+      return;
+    }
+
+    FB.onAuthStateChanged(FB.auth, async user => {
+      showLoading(true);
+      try {
+        if (user) {
+          const userDoc = await FB.getDoc(FB.doc(FB.db, 'users', user.uid));
+          if (userDoc.exists()) {
+            APP.currentUser = { uid: user.uid, ...userDoc.data() };
+            if (APP.currentUser.schoolId) {
+              const schoolDoc = await FB.getDoc(FB.doc(FB.db, 'schools', APP.currentUser.schoolId));
+              if (schoolDoc.exists()) APP.currentSchool = { id: APP.currentUser.schoolId, ...schoolDoc.data() };
+              await DB.getActiveYear(APP.currentUser.schoolId);
+            }
+            const ins = await DB.getInsignia();
+            if (ins) APP.insigniaBase64 = ins;
+            showMainApp();
+          } else {
+            showLoginScreen();
+          }
+        } else {
+          showLoginScreen();
+        }
+      } catch (e) {
+        console.error('Auth state error:', e);
+        showLoginScreen();
+      }
+      showLoading(false);
+    });
+  } catch (e) {
+    clearTimeout(loginTimeout);
+    console.warn('Init error, mostrando login:', e.message);
+    showLoading(false);
+    showLoginScreen();
+  }
+};
+
+// Re-iniciar
+document.addEventListener('DOMContentLoaded', () => { setTimeout(initSystem, 300); });
+
+// ============ FIX 2: INSÍGNIA - Remover fundo preto definitivamente ============
+// O problema é que jsPDF renderiza PNG com fundo preto quando o canvas não está limpo
+// Solução: Processar a imagem removendo pixels escuros do fundo
+
+window.processInsigniaTransparente = function(base64) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      let w = img.width, h = img.height;
+      if (w > 400) { h = h * (400 / w); w = 400; }
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+
+      // Preencher com BRANCO (jsPDF não suporta transparência real)
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, w, h);
+
+      // Desenhar imagem
+      ctx.drawImage(img, 0, 0, w, h);
+
+      // Exportar como JPEG com fundo branco (evita fundo preto)
+      resolve(canvas.toDataURL('image/jpeg', 0.95));
+    };
+    img.onerror = () => resolve(base64);
+    img.src = base64;
+  });
+};
+
+// Override saveInsignia para processar
+PageConfiguracoes.saveInsignia = async function() {
+  const file = document.getElementById('cfgInsigniaFile').files[0];
+  if (!file) { Utils.toast('Selecione uma imagem', 'warning'); return; }
+
+  showLoading(true);
+  try {
+    // Ler o ficheiro original
+    const originalBase64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = e => resolve(e.target.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
+    // Processar para fundo branco (compatível com jsPDF)
+    const processedBase64 = await processInsigniaTransparente(originalBase64);
+
+    await DB.saveDoc('systemConfig', 'general', { insignia: processedBase64 });
+    APP.insigniaBase64 = processedBase64;
+    document.getElementById('cfgInsigniaPreview').innerHTML = `<img src="${processedBase64}" style="max-height:120px;max-width:200px">`;
+    Utils.toast('Insígnia guardada com sucesso (fundo branco)!', 'success');
+  } catch (e) { Utils.toast('Erro: ' + e.message, 'error'); }
+  showLoading(false);
+};
+
+// Override addInsigniaPDF para garantir JPEG
+window.addInsigniaPDF = function(doc, x, y, w, h) {
+  if (!APP.insigniaBase64) return false;
+  try {
+    doc.addImage(APP.insigniaBase64, 'JPEG', x, y, w, h);
+    return true;
+  } catch (e) {
+    try { doc.addImage(APP.insigniaBase64, 'PNG', x, y, w, h); return true; } catch (e2) {}
+    console.warn('Erro insígnia:', e);
+    return false;
+  }
+};
+
+// Reprocessar insígnia existente ao carregar
+(async function() {
+  if (APP.insigniaBase64 && APP.insigniaBase64.includes('image/png')) {
+    APP.insigniaBase64 = await processInsigniaTransparente(APP.insigniaBase64);
+  }
+})();
+
+// ============ FIX 3: PASSES - Layout equilibrado sem espaço vazio ============
+PagePasses._exportPassesPDF = async function(pessoas, tipo) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  const pw = doc.internal.pageSize.getWidth(), ph = doc.internal.pageSize.getHeight();
+  const school = APP.currentSchool;
+  const isAl = tipo === 'aluno';
+
+  if (!APP.insigniaBase64) { const ins = await DB.getInsignia(); if (ins) APP.insigniaBase64 = await processInsigniaTransparente(ins); }
+  const users = await DB.getCollection('users', [FB.where('schoolId', '==', school.id)]);
+  const dir = users.find(u => u.role === 'diretor');
+  const dL = dir ? (dir.sexo === 'F' ? 'A Directora' : 'O Director') : 'O Director';
+  const dN = dir ? dir.name : '';
+
+  const mx = 5, my = 5, gx = 4, gy = 3;
+  const cW = (pw - mx * 2 - gx) / 2;
+  const cH = (ph - my * 2 - gy * 2) / 3;
+  const posArr = [];
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 2; c++)
+    posArr.push({ x: mx + c * (cW + gx), y: my + r * (cH + gy) });
+
+  for (let i = 0; i < pessoas.length; i++) {
+    const pi = i % 6;
+    if (i > 0 && pi === 0) doc.addPage();
+    const pos = posArr[pi], pe = pessoas[i];
+    const cx = pos.x, cy = pos.y;
+
+    // Borda
+    doc.setDrawColor(160, 12, 25);
+    doc.setLineWidth(0.5);
+    doc.roundedRect(cx, cy, cW, cH, 3, 3);
+
+    // Header
+    const headerH = 12;
+    doc.setFillColor(140, 10, 20);
+    doc.roundedRect(cx, cy, cW, headerH, 3, 3, 'F');
+    doc.rect(cx, cy + 5, cW, headerH - 5, 'F');
+
+    if (APP.insigniaBase64) addInsigniaPDF(doc, cx + 3, cy + 1.5, 8, 8);
+
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(5.5);
+    doc.setFont('helvetica', 'bold');
+    doc.text((school.name || '').toUpperCase().substring(0, 42), cx + 13, cy + 5, { maxWidth: cW - 16 });
+    doc.setFontSize(3.8);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`${school.municipality || ''} - ${school.province || ''}`, cx + 13, cy + 8.5);
+    doc.setFontSize(4.5);
+    doc.setFont('helvetica', 'bold');
+    doc.text(isAl ? 'CARTÃO DE ESTUDANTE' : 'CARTÃO FUNCIONAL', cx + cW / 2, cy + 11.5, { align: 'center' });
+
+    // === CORPO: Distribuição equilibrada ===
+    const bodyTop = cy + headerH + 2;
+    const footerH = 10; // assinatura + barra
+    const bodyH = cH - headerH - footerH - 4;
+    doc.setTextColor(0, 0, 0);
+
+    // FOTO GRANDE (proporcional ao espaço)
+    const photoW = 22, photoH = Math.min(28, bodyH - 2);
+    const photoX = cx + 4, photoY = bodyTop;
+
+    doc.setDrawColor(180, 180, 180);
+    doc.setLineWidth(0.3);
+    doc.rect(photoX, photoY, photoW, photoH);
+    if (pe.photo) {
+      try { doc.addImage(pe.photo, 'JPEG', photoX + 0.5, photoY + 0.5, photoW - 1, photoH - 1); } catch (e) {}
+    } else {
+      doc.setFontSize(5);
+      doc.setTextColor(180, 180, 180);
+      doc.text('FOTO', photoX + photoW / 2, photoY + photoH / 2, { align: 'center' });
+      doc.setTextColor(0, 0, 0);
+    }
+
+    // DADOS ao lado da foto
+    const dX = photoX + photoW + 4;
+    const dW = cW - photoW - 12;
+    let dY = bodyTop + 1;
+
+    // Nome grande
+    doc.setFontSize(7.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(140, 10, 20);
+    const nameLines = doc.splitTextToSize(pe.name || '', dW);
+    doc.text(nameLines.slice(0, 2), dX, dY);
+    dY += nameLines.slice(0, 2).length * 3.5 + 2;
+
+    // Separador
+    doc.setDrawColor(200, 200, 200);
+    doc.setLineWidth(0.15);
+    doc.line(dX, dY - 1, dX + dW, dY - 1);
+    dY += 1;
+
+    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(5.5);
+
+    const addField = (label, value) => {
+      doc.setFont('helvetica', 'bold');
+      doc.text(label, dX, dY);
+      doc.setFont('helvetica', 'normal');
+      const labelW = doc.getTextWidth(label + ' ');
+      doc.text(String(value || ''), dX + labelW, dY);
+      dY += 3.5;
+    };
+
+    if (isAl) {
+      addField('Classe:', pe.classeName || '');
+      addField('Turma:', `${pe.turmaName || ''} ${pe.curso ? '(' + pe.curso + ')' : ''}`);
+      addField('Matrícula:', pe.matricula || '');
+      addField('Processo:', pe.processo || '');
+      addField('Ano Lect.:', APP.currentYear?.name || '');
+    } else {
+      addField('Cargo:', getRoleName(pe.role));
+      addField('N° Agente:', pe.agente || 'N/D');
+      addField('BI:', pe.bi || '');
+      addField('Telefone:', pe.phone || pe.telefone || '');
+      addField('Ano Lect.:', APP.currentYear?.name || '');
+    }
+
+    // === ASSINATURA + BARRA ===
+    const assTop = cy + cH - footerH - 1;
+
+    // Assinatura director
+    doc.setFontSize(3.8);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(60, 60, 60);
+    doc.text(dL, cx + cW / 2, assTop, { align: 'center' });
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.2);
+    doc.line(cx + cW / 2 - 20, assTop + 3.5, cx + cW / 2 + 20, assTop + 3.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(3.8);
+    doc.setTextColor(0, 0, 0);
+    doc.text((dN || '').substring(0, 30), cx + cW / 2, assTop + 6.5, { align: 'center' });
+
+    // Barra amarela
+    const barY = cy + cH - 4;
+    doc.setFillColor(249, 214, 22);
+    doc.rect(cx + 0.3, barY, cW - 0.6, 3.7, 'F');
+    doc.setFontSize(4);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(30, 30, 30);
+    doc.text(`REPÚBLICA DE ANGOLA • ${APP.currentYear?.name || ''}`, cx + cW / 2, barY + 2.5, { align: 'center' });
+  }
+
+  doc.save(`passes_${tipo}s.pdf`);
+  Utils.toast('Passes PDF gerados!', 'success');
+};
+
+// ============ FIX 4: CERTIFICADOS - Listar classes, turmas e cursos ============
+PageCertificados.loadFilters = async function() {
+  const sid = APP.currentSchool.id;
+  this._classes = await DB.getCollection('classes', [FB.where('schoolId', '==', sid)]);
+  this._classes.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
+  this._turmas = await DB.getCollection('turmas', [FB.where('schoolId', '==', sid)]);
+  this._disciplinas = await DB.getCollection('disciplinas', [FB.where('schoolId', '==', sid)]);
+  this._disciplinas.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
+  this._allAlunos = await DB.getCollection('alunos', [FB.where('schoolId', '==', sid)]);
+
+  // Anos letivos
+  const anos = await DB.getCollection('academicYears', [FB.where('schoolId', '==', sid)]);
+  const selA = document.getElementById('certAno');
+  if (selA) {
+    selA.innerHTML = '<option value="">Todos os Anos</option>';
+    anos.sort((a, b) => (b.name || '').localeCompare(a.name || '')).forEach(a => {
+      selA.innerHTML += `<option value="${a.id}" ${a.id === APP.currentYearId ? 'selected' : ''}>${a.name}</option>`;
+    });
+    // Ao mudar o ano, recarregar turmas
+    selA.onchange = () => this.onClasseChange();
+  }
+
+  // Classes finais
+  const selC = document.getElementById('certClasse');
+  if (selC) {
+    selC.innerHTML = '<option value="">Selecione a Classe</option>';
+    this._classes.filter(c => Utils.isClasseFinal(c.name)).forEach(c => {
+      selC.innerHTML += `<option value="${c.id}">${c.name}</option>`;
+    });
+  }
+};
+
+PageCertificados.onClasseChange = function() {
+  const cid = document.getElementById('certClasse').value;
+  const yearId = document.getElementById('certAno')?.value || '';
+  const sel = document.getElementById('certTurma');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">Todas as Turmas</option>';
+
+  if (!cid) return;
+
+  // Filtrar turmas pela classe (e ano se seleccionado)
+  let turmasFiltradas = this._turmas.filter(t => t.classeId === cid);
+  if (yearId) turmasFiltradas = turmasFiltradas.filter(t => t.yearId === yearId || !t.yearId);
+
+  if (turmasFiltradas.length === 0) {
+    // Se não encontrar com yearId, mostrar todas da classe
+    turmasFiltradas = this._turmas.filter(t => t.classeId === cid);
+  }
+
+  turmasFiltradas.forEach(t => {
+    sel.innerHTML += `<option value="${t.id}">${t.name} ${t.curso ? '- ' + t.curso : ''} ${t.turnoName ? '(' + t.turnoName + ')' : ''}</option>`;
+  });
+
+  // Mostrar info sobre turmas encontradas
+  if (turmasFiltradas.length === 0) {
+    Utils.toast('Nenhuma turma encontrada para esta classe. Verifique o cadastro de turmas.', 'warning');
+  }
+};
+
+// ============ FIX 5: DATA NOS DOCUMENTOS - Escola + Data ============
+// Formato: "Complexo Escolar N° 140, aos 15 de Janeiro de 2025"
+window.Utils.getDataDocumento = function(school) {
+  const d = new Date();
+  const meses = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+  const provincia = school?.province || school?.municipality || '';
+  return `${provincia}, aos ${d.getDate()} de ${meses[d.getMonth()]} de ${d.getFullYear()}`;
+};
+
+// Actualizar nos certificados
+const _origCertRenderFix = PageCertificados._renderCertificadoPage;
+PageCertificados._renderCertificadoPage = async function(doc, aluno) {
+  // Substituir getCurrentDate pela versão com escola
+  const origGetDate = Utils.getCurrentDate;
+  Utils.getCurrentDate = () => Utils.getDataDocumento(APP.currentSchool);
+  await _origCertRenderFix.call(this, doc, aluno);
+  Utils.getCurrentDate = origGetDate;
+};
+
+// Actualizar nas declarações
+const _origDeclRenderFix = PageDeclaracoes._renderDeclaracaoPage;
+PageDeclaracoes._renderDeclaracaoPage = async function(doc, aluno) {
+  const origGetDate = Utils.getCurrentDate;
+  Utils.getCurrentDate = () => Utils.getDataDocumento(APP.currentSchool);
+  await _origDeclRenderFix.call(this, doc, aluno);
+  Utils.getCurrentDate = origGetDate;
+};
+
+// ============ FIX 6: RELATÓRIO COMPLETO - Alunos com Notas ============
+// Adicionar ao menu de relatórios
+const origRelRender = PageRelatorios.render;
+PageRelatorios.render = async function(container) {
+  await origRelRender.call(this, container);
+
+  // Adicionar card do relatório completo na tab académico
+  const tabAcad = document.getElementById('tabRelAcademico');
+  if (tabAcad) {
+    const grid = tabAcad.querySelector('.grid-3');
+    if (grid) {
+      grid.innerHTML += `
+        ${this._cardRel('Relatório Completo (Alunos + Notas)', 'fas fa-file-alt', 'teal', 'relCompletoAlunosNotas')}
+        ${this._cardRel('Ficha Individual por Turma', 'fas fa-user-graduate', 'purple', 'relFichasPorTurma')}
+      `;
+    }
+  }
+};
+
+// Geração do relatório completo
+const origRelGenerate2 = PageRelatorios.generate;
+PageRelatorios.generate = async function(action) {
+  if (action === 'relCompletoAlunosNotas') {
+    await this._gerarRelatorioCompleto();
+    return;
+  }
+  if (action === 'relFichasPorTurma') {
+    await this._gerarFichasPorTurma();
+    return;
+  }
+  await origRelGenerate2.call(this, action);
+};
+
+PageRelatorios._gerarRelatorioCompleto = async function() {
+  const sid = APP.currentSchool.id;
+  showLoading(true);
+  try {
+    let aQ = [FB.where('schoolId', '==', sid)];
+    if (APP.currentYearId) aQ.push(FB.where('yearId', '==', APP.currentYearId));
+    const alunos = await DB.getCollection('alunos', aQ);
+    alunos.sort((a, b) => (a.classeName || '').localeCompare(b.classeName || '') || (a.name || '').localeCompare(b.name || ''));
+
+    let nQ = [FB.where('schoolId', '==', sid)];
+    if (APP.currentYearId) nQ.push(FB.where('yearId', '==', APP.currentYearId));
+    const notas = await DB.getCollection('notas', nQ);
+
+    const disciplinas = await DB.getCollection('disciplinas', [FB.where('schoolId', '==', sid)]);
+    disciplinas.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
+
+    // === GERAR PDF ===
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF('landscape');
+    let y = PDFHelper.addHeader(doc, APP.currentSchool, { title: 'RELATÓRIO COMPLETO - ALUNOS E NOTAS' });
+    doc.setFontSize(8);
+    doc.text(`Ano Letivo: ${APP.currentYear?.name || 'N/D'} | Data: ${Utils.getDataDocumento(APP.currentSchool)}`, 14, y + 3);
+    y += 8;
+
+    // Agrupar por classe
+    const porClasse = {};
+    alunos.forEach(a => {
+      const c = a.classeName || 'N/D';
+      if (!porClasse[c]) porClasse[c] = [];
+      porClasse[c].push(a);
+    });
+
+    const classesOrd = Object.keys(porClasse).sort((a, b) => Utils.getClasseNum(a) - Utils.getClasseNum(b));
+
+    classesOrd.forEach(classe => {
+      const alunosClasse = porClasse[classe];
+      const discsClasse = disciplinas.filter(d => d.classeName === classe || alunosClasse.some(a => a.classeId === d.classeId));
+      const discsUnique = [];
+      const seen = new Set();
+      discsClasse.forEach(d => { if (!seen.has(d.name)) { seen.add(d.name); discsUnique.push(d); } });
+
+      if (y > 170) { doc.addPage(); y = 15; }
+
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'bold');
+      doc.text(`${classe}`, 14, y);
+      y += 3;
+
+      const head = [['#', 'Nome', 'Sexo', 'Turma', ...discsUnique.map(d => d.name.substring(0, 8)), 'Média', 'Obs.']];
+      const body = alunosClasse.map((a, i) => {
+        const row = [i + 1, a.name, a.sexo || '', a.turmaName || ''];
+        let soma = 0, count = 0;
+        const notasAluno = [];
+
+        discsUnique.forEach(d => {
+          const nota = notas.find(n => n.alunoId === a.id && (n.disciplinaId === d.id || n.disciplina === d.name));
+          if (nota) {
+            const calc = Utils.calcularMedia(nota, classe);
+            const mfd = calc.mfd;
+            if (mfd !== null) {
+              row.push(Math.round(mfd));
+              soma += mfd;
+              count++;
+              notasAluno.push({ mfd, disciplina: d.name });
+            } else { row.push('-'); }
+          } else { row.push('-'); }
+        });
+
+        const media = count > 0 ? Math.round(soma / count) : null;
+        row.push(media !== null ? media : '-');
+
+        let obs = '';
+        if (a.estado === 'Transferido') obs = 'Transf.';
+        else if (a.estado === 'Desistente') obs = 'Desist.';
+        else if (notasAluno.length > 0 && notasAluno.length === discsUnique.length) {
+          obs = Utils.genero(a.sexo, Utils.checkAprovacao(a, classe, notasAluno)).substring(0, 8);
+        }
+        row.push(obs);
+        return row;
+      });
+
+      doc.autoTable({
+        startY: y,
+        head, body,
+        styles: { fontSize: 5, halign: 'center', cellPadding: 1 },
+        headStyles: { fillColor: [15, 23, 42], fontSize: 4.5 },
+        columnStyles: { 1: { halign: 'left', cellWidth: 30 } },
+        margin: { left: 14, right: 14 },
+        didParseCell: data => {
+          if (data.column.index === 1 && data.section === 'body') {
+            data.cell.styles.textColor = [206, 17, 38];
+            data.cell.styles.fontStyle = 'bold';
+          }
+        }
+      });
+      y = doc.lastAutoTable.finalY + 10;
+    });
+
+    doc.save('relatorio_completo_alunos_notas.pdf');
+    Utils.toast('Relatório completo PDF gerado!', 'success');
+
+    // === GERAR XLSX ===
+    const wb = XLSX.utils.book_new();
+
+    classesOrd.forEach(classe => {
+      const alunosClasse = porClasse[classe];
+      const discsClasse = disciplinas.filter(d => d.classeName === classe || alunosClasse.some(a => a.classeId === d.classeId));
+      const discsUnique = [];
+      const seen = new Set();
+      discsClasse.forEach(d => { if (!seen.has(d.name)) { seen.add(d.name); discsUnique.push(d); } });
+
+      const data = alunosClasse.map((a, i) => {
+        const row = { '#': i + 1, 'Nome': a.name, 'Sexo': a.sexo, 'Turma': a.turmaName, 'Matrícula': a.matricula, 'BI': a.bi || '', 'Encarregado': a.encarregado || '', 'Tel.Enc.': a.telEncarregado || '' };
+        let soma = 0, count = 0;
+
+        discsUnique.forEach(d => {
+          const nota = notas.find(n => n.alunoId === a.id && (n.disciplinaId === d.id || n.disciplina === d.name));
+          if (nota) {
+            const calc = Utils.calcularMedia(nota, classe);
+            if (calc.mt1 !== null) row[d.name + ' MT1'] = calc.mt1;
+            if (calc.mt2 !== null) row[d.name + ' MT2'] = calc.mt2;
+            if (calc.mfd !== null) { row[d.name + ' MFD'] = Math.round(calc.mfd); soma += calc.mfd; count++; }
+          }
+        });
+
+        row['Média Geral'] = count > 0 ? Math.round(soma / count) : '';
+        row['Estado'] = a.estado || '';
+        return row;
+      });
+
+      const wsName = classe.substring(0, 31).replace(/[\/\\?*\[\]]/g, '');
+      const ws = XLSX.utils.json_to_sheet(data);
+      XLSX.utils.book_append_sheet(wb, ws, wsName);
+    });
+
+    XLSX.writeFile(wb, 'relatorio_completo_alunos_notas.xlsx');
+    Utils.toast('Relatório XLSX também exportado!', 'success');
+
+  } catch (e) {
+    console.error(e);
+    Utils.toast('Erro: ' + e.message, 'error');
+  }
+  showLoading(false);
+};
+
+PageRelatorios._gerarFichasPorTurma = async function() {
+  Utils.toast('Selecione alunos individuais no menu Estudantes para gerar fichas PDF', 'info');
+};
+
+// ============ FIX 7: Preview de passes - também equilibrado ============
+PagePasses._renderPasseCard = function(pessoa, tipo) {
+  const school = APP.currentSchool;
+  const isAluno = tipo === 'aluno';
+  return `
+    <div class="card" style="border:2px solid var(--angola-red);border-radius:10px;overflow:hidden;max-width:320px">
+      <div style="background:linear-gradient(135deg,#8c0a14,#b91c2e);color:#fff;padding:8px 12px;text-align:center">
+        <strong style="font-size:10px;letter-spacing:0.5px">${(school.name || 'ESCOLA').toUpperCase()}</strong><br>
+        <span style="font-size:8px;opacity:0.8">${school.municipality || ''} - ${school.province || ''}</span><br>
+        <span style="font-size:9px;font-weight:700;letter-spacing:1px">${isAluno ? 'CARTÃO DE ESTUDANTE' : 'CARTÃO FUNCIONAL'}</span>
+      </div>
+      <div style="display:flex;padding:10px;gap:10px;align-items:flex-start">
+        <div style="flex-shrink:0">
+          ${pessoa.photo ? `<img src="${pessoa.photo}" style="width:60px;height:75px;border-radius:6px;object-fit:cover;border:2px solid var(--angola-red)">` :
+            '<div style="width:60px;height:75px;border-radius:6px;background:#f0f0f0;display:flex;align-items:center;justify-content:center;border:1px solid #ddd"><i class="fas fa-user" style="font-size:24px;color:#ccc"></i></div>'}
+        </div>
+        <div style="flex:1;min-width:0;font-size:11px;line-height:1.6">
+          <p style="font-weight:700;color:var(--angola-red);font-size:12px;margin-bottom:4px;border-bottom:1px solid #eee;padding-bottom:4px">${pessoa.name || ''}</p>
+          ${isAluno ? `
+            <p><strong>Classe:</strong> ${pessoa.classeName || ''}</p>
+            <p><strong>Turma:</strong> ${pessoa.turmaName || ''} ${pessoa.curso ? '(' + pessoa.curso + ')' : ''}</p>
+            <p><strong>Mat.:</strong> ${pessoa.matricula || ''}</p>
+          ` : `
+            <p><strong>Cargo:</strong> ${getRoleName(pessoa.role)}</p>
+            <p><strong>Agente:</strong> ${pessoa.agente || 'N/D'}</p>
+            <p><strong>BI:</strong> ${pessoa.bi || ''}</p>
+          `}
+        </div>
+      </div>
+      <div style="text-align:center;padding:4px;font-size:8px;color:var(--text-light);border-top:1px solid #eee">
+        ${dir ? (dir.sexo === 'F' ? 'A Directora' : 'O Director') : 'Director'}: ${dir?.name || ''}
+      </div>
+      <div style="background:var(--angola-yellow);padding:4px;text-align:center">
+        <span style="font-size:8px;font-weight:700;color:#000;letter-spacing:0.5px">REPÚBLICA DE ANGOLA • ${APP.currentYear?.name || ''}</span>
+      </div>
+    </div>`;
+};
+
+// ============ VERIFICAÇÃO ============
+console.log('%c✅ Correções finais aplicadas!', 'color:#059669;font-weight:bold;font-size:14px');
+console.log('  ✓ Login seguro: internet lenta mostra login (não setup)');
+console.log('  ✓ Insígnia: fundo branco (compatível jsPDF)');
+console.log('  ✓ Passes: layout equilibrado, foto maior, sem espaço vazio');
+console.log('  ✓ Certificados: lista classes, turmas e cursos');
+console.log('  ✓ Data documentos: Província/Escola + data');
+console.log('  ✓ Relatório Completo: PDF + XLSX com alunos e todas notas');
+</script>
+<script type="module">
+// ============================================================
+// CORREÇÃO COMPLETA DO MÓDULO CERTIFICADOS
+// ============================================================
+
+// Reescrever completamente o módulo de certificados
+window.PageCertificados = {
+  _classes: [],
+  _turmas: [],
+  _disciplinas: [],
+  _allAlunos: [],
+  _anos: [],
+
+  async render(container) {
+    const schoolId = APP.currentSchool ? APP.currentSchool.id : null;
+    if (!schoolId) {
+      container.innerHTML = '<div class="empty-state"><i class="fas fa-school"></i><p>Selecione uma escola primeiro</p></div>';
+      return;
+    }
+
+    container.innerHTML = `
+      <h2 class="page-title"><i class="fas fa-certificate"></i> Certificados</h2>
+      <div class="card mb-3 no-print">
+        <div class="card-body">
+          <p style="color:var(--text-light);margin-bottom:16px">
+            <i class="fas fa-info-circle"></i> Certificados para classes finais: 6ª Classe, 9ª Classe, 12ª Classe e 13ª Classe
+          </p>
+
+          <div class="form-row-4">
+            <div class="form-group">
+              <label>Ano Letivo</label>
+              <select id="certAno" onchange="PageCertificados.onAnoChange()">
+                <option value="">Todos os Anos</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Classe (Final) *</label>
+              <select id="certClasse" onchange="PageCertificados.onClasseChange()">
+                <option value="">Selecione a Classe</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Turma</label>
+              <select id="certTurma">
+                <option value="">Todas as Turmas</option>
+              </select>
+            </div>
+            <div class="form-group" style="padding-top:20px">
+              <button class="btn btn-primary" onclick="PageCertificados.gerar()">
+                <i class="fas fa-cogs"></i> Gerar Certificados
+              </button>
+            </div>
+          </div>
+
+          <hr>
+          <h4 style="margin-bottom:8px"><i class="fas fa-search"></i> Pesquisa Individual</h4>
+          <div class="form-group">
+            <label>Pesquisar aluno de classe final (nome, BI ou matrícula)</label>
+            <input type="text" id="certSearchAluno" class="search-input w-full"
+              placeholder="Digite para pesquisar alunos da 6ª, 9ª, 12ª ou 13ª classe..."
+              oninput="PageCertificados.searchAluno()">
+          </div>
+          <div id="certSearchResults" style="max-height:250px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius);display:none"></div>
+
+          <div id="certDebugInfo" style="margin-top:12px;font-size:11px;color:var(--text-light)"></div>
+        </div>
+      </div>
+      <div id="certContent"></div>`;
+
+    showLoading(true);
+    await this.loadAllData();
+    this.populateFilters();
+    showLoading(false);
+  },
+
+  async loadAllData() {
+    const sid = APP.currentSchool.id;
+    try {
+      // Carregar TUDO de uma vez
+      this._classes = await DB.getCollection('classes', [FB.where('schoolId', '==', sid)]);
+      this._classes.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
+
+      this._turmas = await DB.getCollection('turmas', [FB.where('schoolId', '==', sid)]);
+
+      this._disciplinas = await DB.getCollection('disciplinas', [FB.where('schoolId', '==', sid)]);
+      this._disciplinas.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
+
+      this._allAlunos = await DB.getCollection('alunos', [FB.where('schoolId', '==', sid)]);
+
+      this._anos = await DB.getCollection('academicYears', [FB.where('schoolId', '==', sid)]);
+      this._anos.sort((a, b) => (b.name || '').localeCompare(a.name || ''));
+
+      // Debug
+      const classesFinal = this._classes.filter(c => Utils.isClasseFinal(c.name));
+      const alunosFinais = this._allAlunos.filter(a => {
+        const classe = this._classes.find(c => c.id === a.classeId);
+        return classe && Utils.isClasseFinal(classe.name);
+      });
+
+      const debugDiv = document.getElementById('certDebugInfo');
+      if (debugDiv) {
+        debugDiv.innerHTML = `
+          <span class="badge badge-info">Classes finais: ${classesFinal.length}</span>
+          <span class="badge badge-primary" style="margin-left:4px">Turmas: ${this._turmas.length}</span>
+          <span class="badge badge-success" style="margin-left:4px">Alunos em classes finais: ${alunosFinais.length}</span>
+          <span class="badge badge-secondary" style="margin-left:4px">Total alunos: ${this._allAlunos.length}</span>
+        `;
+      }
+    } catch (e) {
+      console.error('Erro ao carregar dados certificados:', e);
+      Utils.toast('Erro ao carregar dados: ' + e.message, 'error');
+    }
+  },
+
+  populateFilters() {
+    // Anos letivos
+    const selA = document.getElementById('certAno');
+    if (selA) {
+      selA.innerHTML = '<option value="">Todos os Anos</option>';
+      this._anos.forEach(a => {
+        selA.innerHTML += `<option value="${a.id}" ${a.id === APP.currentYearId ? 'selected' : ''}>${a.name}</option>`;
+      });
+    }
+
+    // Classes finais
+    const selC = document.getElementById('certClasse');
+    if (selC) {
+      selC.innerHTML = '<option value="">Selecione a Classe</option>';
+      const classesFinal = this._classes.filter(c => Utils.isClasseFinal(c.name));
+
+      if (classesFinal.length === 0) {
+        // Se não encontrar por isClasseFinal, tentar por nome
+        this._classes.forEach(c => {
+          const n = (c.name || '').replace(/[ªº°\s]/g, '').toLowerCase();
+          if (n.includes('6') || n.includes('9') || n.includes('12') || n.includes('13')) {
+            classesFinal.push(c);
+          }
+        });
+      }
+
+      classesFinal.forEach(c => {
+        const numAlunos = this._allAlunos.filter(a => a.classeId === c.id).length;
+        selC.innerHTML += `<option value="${c.id}">${c.name} (${numAlunos} alunos)</option>`;
+      });
+
+      if (classesFinal.length === 0) {
+        selC.innerHTML += '<option value="" disabled>Nenhuma classe final cadastrada</option>';
+        Utils.toast('Nenhuma classe final (6ª, 9ª, 12ª, 13ª) encontrada. Cadastre classes primeiro.', 'warning');
+      }
+    }
+  },
+
+  onAnoChange() {
+    this.onClasseChange();
+  },
+
+  onClasseChange() {
+    const classeId = document.getElementById('certClasse').value;
+    const yearId = document.getElementById('certAno')?.value || '';
+    const sel = document.getElementById('certTurma');
+    if (!sel) return;
+
+    sel.innerHTML = '<option value="">Todas as Turmas</option>';
+
+    if (!classeId) return;
+
+    // Filtrar turmas por classe
+    let turmasFiltradas = this._turmas.filter(t => t.classeId === classeId);
+
+    // Se ano selecionado, filtrar por ano também
+    if (yearId) {
+      const turmasDoAno = turmasFiltradas.filter(t => t.yearId === yearId);
+      if (turmasDoAno.length > 0) turmasFiltradas = turmasDoAno;
+      // Se não encontrar turmas do ano, mantém todas da classe
+    }
+
+    turmasFiltradas.forEach(t => {
+      const numAlunos = this._allAlunos.filter(a => a.turmaId === t.id).length;
+      sel.innerHTML += `<option value="${t.id}">${t.name} ${t.curso ? '(' + t.curso + ')' : ''} ${t.turnoName ? '- ' + t.turnoName : ''} [${numAlunos} alunos]</option>`;
+    });
+
+    if (turmasFiltradas.length === 0) {
+      sel.innerHTML += '<option value="" disabled>Nenhuma turma para esta classe</option>';
+    }
+  },
+
+  searchAluno() {
+    const term = (document.getElementById('certSearchAluno')?.value || '').toLowerCase().trim();
+    const div = document.getElementById('certSearchResults');
+    if (!term || term.length < 2) { div.style.display = 'none'; return; }
+
+    // Filtrar alunos de classes finais
+    const matches = this._allAlunos.filter(a => {
+      // Verificar se está numa classe final
+      const classe = this._classes.find(c => c.id === a.classeId);
+      if (!classe) return false;
+      const isFinal = Utils.isClasseFinal(classe.name);
+      if (!isFinal) {
+        // Tentar por nome
+        const cn = (classe.name || '').replace(/[ªº°\s]/g, '').toLowerCase();
+        if (!cn.includes('6') && !cn.includes('9') && !cn.includes('12') && !cn.includes('13')) return false;
+      }
+
+      // Filtrar por termo
+      return (a.name || '').toLowerCase().includes(term) ||
+        (a.bi || '').toLowerCase().includes(term) ||
+        (a.matricula || '').toLowerCase().includes(term) ||
+        (a.processo || '').toLowerCase().includes(term);
+    }).slice(0, 15);
+
+    if (matches.length === 0) {
+      div.innerHTML = `<div style="padding:12px;color:var(--text-light)">
+        <p>Nenhum aluno encontrado nas classes finais.</p>
+        <p style="font-size:11px;margin-top:4px">Verifique se há alunos cadastrados na 6ª, 9ª, 12ª ou 13ª classe.</p>
+      </div>`;
+    } else {
+      div.innerHTML = matches.map(a => {
+        const classe = this._classes.find(c => c.id === a.classeId);
+        const turma = this._turmas.find(t => t.id === a.turmaId);
+        const ano = this._anos.find(y => y.id === a.yearId);
+        return `
+          <div style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px"
+               onmouseover="this.style.background='#f0f4ff'" onmouseout="this.style.background=''"
+               onclick="PageCertificados.gerarIndividual('${a.id}')">
+            ${a.photo ? `<img src="${a.photo}" class="photo-small">` : '<i class="fas fa-user-circle" style="font-size:24px;color:var(--text-light)"></i>'}
+            <div style="flex:1">
+              <strong style="color:var(--angola-red)">${a.name}</strong>
+              <br><small>${classe?.name || 'N/D'} | Turma: ${turma?.name || 'N/D'} ${turma?.curso ? '(' + turma.curso + ')' : ''} | ${ano?.name || a.yearName || ''}</small>
+              <br><small>Mat: ${a.matricula || 'N/D'} | BI: ${a.bi || 'N/D'} | Estado: ${a.estado || 'N/D'}</small>
+            </div>
+            <button class="btn btn-sm btn-primary" style="flex-shrink:0"><i class="fas fa-certificate"></i> Gerar</button>
+          </div>`;
+      }).join('');
+    }
+    div.style.display = 'block';
+  },
+
+  async gerarIndividual(alunoId) {
+    document.getElementById('certSearchResults').style.display = 'none';
+    showLoading(true);
+    try {
+      const aluno = this._allAlunos.find(a => a.id === alunoId);
+      if (!aluno) { Utils.toast('Aluno não encontrado', 'error'); showLoading(false); return; }
+
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF();
+      await this._renderCertificadoPage(doc, aluno);
+      doc.save(`certificado_${(aluno.name || '').replace(/\s/g, '_')}.pdf`);
+      Utils.toast('Certificado gerado para ' + aluno.name, 'success');
+    } catch (e) {
+      console.error(e);
+      Utils.toast('Erro: ' + e.message, 'error');
+    }
+    showLoading(false);
+  },
+
+  async gerar() {
+    const classeId = document.getElementById('certClasse').value;
+    const turmaId = document.getElementById('certTurma').value;
+    const yearId = document.getElementById('certAno')?.value || '';
+
+    if (!classeId) { Utils.toast('Selecione a classe', 'warning'); return; }
+
+    showLoading(true);
+    try {
+      // Filtrar alunos
+      let alunos = this._allAlunos.filter(a => a.classeId === classeId);
+      if (turmaId) alunos = alunos.filter(a => a.turmaId === turmaId);
+      if (yearId) {
+        const alunosDoAno = alunos.filter(a => a.yearId === yearId);
+        if (alunosDoAno.length > 0) alunos = alunosDoAno;
+      }
+
+      // Filtrar activos
+      alunos = alunos.filter(a => a.estado === 'Activo' || a.estado === 'Ativo' || a.estado === 'Rematriculado');
+      alunos.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+      if (alunos.length === 0) {
+        const classe = this._classes.find(c => c.id === classeId);
+        Utils.toast(`Nenhum aluno activo encontrado na ${classe?.name || 'classe seleccionada'}. Verifique o estado dos alunos.`, 'warning');
+        showLoading(false);
+        return;
+      }
+
+      // Gerar PDF
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF();
+
+      for (let i = 0; i < alunos.length; i++) {
+        if (i > 0) doc.addPage();
+        await this._renderCertificadoPage(doc, alunos[i]);
+      }
+
+      const classe = this._classes.find(c => c.id === classeId);
+      doc.save(`certificados_${classe?.name || ''}.pdf`);
+      Utils.toast(`${alunos.length} certificados gerados!`, 'success');
+
+      // Mostrar preview
+      document.getElementById('certContent').innerHTML = `
+        <div class="card"><div class="card-body" style="text-align:center;padding:30px">
+          <i class="fas fa-check-circle" style="font-size:48px;color:var(--success);margin-bottom:12px"></i>
+          <h3>${alunos.length} certificado(s) gerado(s)</h3>
+          <p style="color:var(--text-light);margin-top:8px">${classe?.name || ''} - O ficheiro PDF foi descarregado</p>
+        </div></div>`;
+
+    } catch (e) {
+      console.error(e);
+      Utils.toast('Erro: ' + e.message, 'error');
+    }
+    showLoading(false);
+  },
+
+  async _renderCertificadoPage(doc, aluno) {
+    const pw = doc.internal.pageSize.getWidth();
+    const school = APP.currentSchool;
+
+    // Garantir insígnia
+    if (!APP.insigniaBase64) {
+      const ins = await DB.getInsignia();
+      if (ins) APP.insigniaBase64 = typeof processInsigniaTransparente === 'function' ? await processInsigniaTransparente(ins) : ins;
+    }
+
+    const users = await DB.getCollection('users', [FB.where('schoolId', '==', school.id)]);
+    const diretor = users.find(u => u.role === 'diretor');
+
+    const classeObj = this._classes.find(c => c.id === aluno.classeId);
+    const classeName = classeObj?.name || aluno.classeName || '';
+    const classeNum = Utils.getClasseNum(classeName);
+    const ciclo = Utils.getCiclo(classeName);
+    const nivelEnsino = Utils.getNivelEnsino(classeName);
+    const alinea = Utils.getAlinea(classeName);
+    const isCiclo2 = ciclo === 'ciclo2';
+
+    // Classes para notas no certificado
+    let classesParaNotas = [];
+    if (classeNum <= 6) classesParaNotas = ['1ª Classe', '2ª Classe', '3ª Classe', '4ª Classe', '5ª Classe', '6ª Classe'];
+    else if (classeNum <= 9) classesParaNotas = ['7ª Classe', '8ª Classe', '9ª Classe'];
+    else { classesParaNotas = ['10ª Classe', '11ª Classe', '12ª Classe']; if (classeNum === 13) classesParaNotas.push('13ª Classe'); }
+
+    // Carregar notas
+    const notas = await DB.getCollection('notas', [FB.where('alunoId', '==', aluno.id)]);
+    const notasHist = await DB.getCollection('notasHistorico', [FB.where('alunoId', '==', aluno.id)]);
+    const todasNotas = [...notas, ...notasHist];
+
+    // Disciplinas do ciclo
+    const discNames = new Set();
+    const discsPorCategoria = { geral: [], especifica: [], opcional: [] };
+
+    classesParaNotas.forEach(cn => {
+      const cObj = this._classes.find(c => c.name === cn);
+      if (!cObj) return;
+      let discsClasse = this._disciplinas.filter(d => d.classeId === cObj.id);
+      if (aluno.curso) discsClasse = discsClasse.filter(d => !d.curso || d.curso === aluno.curso || d.curso === '');
+      discsClasse.forEach(d => {
+        if (!discNames.has(d.name)) {
+          discNames.add(d.name);
+          const cat = d.categoria || 'geral';
+          if (!discsPorCategoria[cat]) discsPorCategoria[cat] = [];
+          discsPorCategoria[cat].push(d);
+        }
+      });
+    });
+
+    const discList = [...(discsPorCategoria.geral || []), ...(discsPorCategoria.especifica || []), ...(discsPorCategoria.opcional || [])];
+
+    // Tabela de notas
+    let somaMediaFinal = 0, countMediaFinal = 0;
+    const tabelaNotas = [];
+
+    discList.forEach(disc => {
+      const row = { disciplina: disc.name, categoria: disc.categoria || 'geral', notas: {}, mediaFinal: null };
+      let soma = 0, count = 0;
+
+      classesParaNotas.forEach(cn => {
+        const cObj = this._classes.find(c => c.name === cn);
+        if (!cObj) { row.notas[cn] = '–'; return; }
+
+        const nota = todasNotas.find(n =>
+          (n.disciplinaId === disc.id || n.disciplina === disc.name || n.disciplinaName === disc.name) &&
+          (n.classeId === cObj.id || n.classeName === cn || n.classe === cn)
+        );
+
+        if (nota) {
+          const calc = Utils.calcularMedia(nota, cn);
+          const mfd = calc.mfd ?? (nota.mfd != null ? parseFloat(nota.mfd) : null);
+          if (mfd !== null) {
+            row.notas[cn] = Math.round(mfd);
+            soma += Math.round(mfd); count++;
+          } else { row.notas[cn] = '–'; }
+        } else { row.notas[cn] = '–'; }
+      });
+
+      row.mediaFinal = count > 0 ? Math.round(soma / count) : null;
+      if (row.mediaFinal !== null) { somaMediaFinal += row.mediaFinal; countMediaFinal++; }
+      tabelaNotas.push(row);
+    });
+
+    const mediaGeral = countMediaFinal > 0 ? Math.round(somaMediaFinal / countMediaFinal) : null;
+
+    // ===== RENDER PDF =====
+    let y = 12;
+    if (APP.insigniaBase64) { addInsigniaPDF(doc, pw / 2 - 12, y, 24, 24); y += 27; }
+
+    doc.setFontSize(11); doc.setFont('helvetica', 'bold');
+    doc.text('REPÚBLICA DE ANGOLA', pw / 2, y, { align: 'center' }); y += 5;
+    doc.setFontSize(9); doc.setFont('helvetica', 'normal');
+    doc.text('MINISTÉRIO DA EDUCAÇÃO', pw / 2, y, { align: 'center' }); y += 10;
+    doc.setFontSize(14); doc.setFont('helvetica', 'bold');
+    doc.text('CERTIFICADO', pw / 2, y, { align: 'center' }); y += 10;
+
+    // Corpo
+    const dirNome = diretor ? diretor.name : '____________________';
+    const dirGenero = diretor ? (diretor.sexo === 'F' ? 'Directora' : 'Director') : 'Director';
+    const nascData = aluno.nascimento ? aluno.nascimento.split('-').reverse().join('/') : '.../.../....';
+    const biData = aluno.biData ? aluno.biData.split('-').reverse().join('/') : '.../.../....';
+    const cursoText = aluno.curso ? `, na área de ${aluno.curso}` : '';
+    const denominado = aluno.curso ? `, denominado ${aluno.curso},` : ',';
+
+    doc.setFontSize(9); doc.setFont('helvetica', 'normal');
+    const corpo = `${dirNome}, ${dirGenero} ${school.denominacao ? 'do ' + school.denominacao : 'do ' + (school.name || '________')}${denominado} criado${school.decretoExecutivo ? ' sobre Decreto Executivo n° ' + school.decretoExecutivo : ''}, ao abrigo do disposto na alínea ${alinea} do artigo 109° da Lei n° 32/20 de 12 de Agosto, certifica que ${aluno.name}, ${Utils.genero(aluno.sexo, 'filho')} de ${aluno.nomePai || '________'} e de ${aluno.nomeMae || '________'}, ${Utils.genero(aluno.sexo, 'nascido')} aos ${nascData}, ${Utils.genero(aluno.sexo, 'natural')} de ${aluno.naturalidade || '________'}, município de ${aluno.municipio || '________'}, província ${aluno.provincia || '________'}, ${Utils.genero(aluno.sexo, 'portador')} do B.I. n° ${aluno.bi || '________'}, passado pelo Arquivo de Identificação de ${aluno.biLocal || '________'}, aos ${biData}, concluiu no ano lectivo ${aluno.yearName || '20.../20...'} o ${nivelEnsino}${cursoText}, conforme consta do processo individual n° ${aluno.processo || '____/20__'}, com a média final de ${mediaGeral !== null ? mediaGeral + ' valores' : '_____ valores'}, obtidas pelas seguintes classificações por disciplinas:`;
+
+    const lines = doc.splitTextToSize(corpo, pw - 30);
+    doc.text(lines, 15, y, { align: 'justify', maxWidth: pw - 30 }); y += lines.length * 4 + 5;
+
+    // Tabela
+    const head = [['Disciplinas', ...classesParaNotas.map(c => { const n = Utils.getClasseNum(c); return n > 0 ? n + '.ª' : c; }), 'Média Final', 'Média por extenso']];
+    const bodyRows = [];
+    let lastCat = '';
+
+    tabelaNotas.forEach(row => {
+      if (isCiclo2 && row.categoria !== lastCat) {
+        const catNames = { geral: 'Formação geral', especifica: 'Formação específica', opcional: 'Disciplina Opcional' };
+        bodyRows.push([{ content: catNames[row.categoria] || '', colSpan: head[0].length, styles: { fontStyle: 'bold', fillColor: [240, 240, 240] } }]);
+        lastCat = row.categoria;
+      }
+      const r = [row.disciplina];
+      classesParaNotas.forEach(cn => r.push(row.notas[cn] ?? '–'));
+      r.push(row.mediaFinal !== null ? row.mediaFinal : '–');
+      r.push(row.mediaFinal !== null ? Utils.valorExtensoInteiro(row.mediaFinal) : '–');
+      bodyRows.push(r);
+    });
+
+    doc.autoTable({
+      startY: y, head, body: bodyRows,
+      styles: { fontSize: 7, halign: 'center', cellPadding: 1.8 },
+      headStyles: { fillColor: [15, 23, 42], fontSize: 7 },
+      columnStyles: { 0: { halign: 'left' } },
+      margin: { left: 15, right: 15 }
+    });
+    y = doc.lastAutoTable.finalY + 6;
+
+    // Fecho
+    const fecho = `Para efeitos legais lhe é passado o presente CERTIFICADO, que consta no livro de registo n° ${aluno.processo || '______'}, folha ${isCiclo2 && aluno.curso ? aluno.curso.substring(0, 2).toUpperCase() + '-' : ''}${aluno.yearName || '____'}, assinado por mim e autenticado com carimbo a óleo/selo branco em uso neste estabelecimento de Ensino.`;
+    doc.setFontSize(9); doc.setFont('helvetica', 'normal');
+    const fechoL = doc.splitTextToSize(fecho, pw - 30);
+    doc.text(fechoL, 15, y, { maxWidth: pw - 30 }); y += fechoL.length * 4.5 + 4;
+
+    // Data com nome da escola
+    const dataDoc = typeof Utils.getDataDocumento === 'function'
+      ? Utils.getDataDocumento(school)
+      : `${school.province || ''}, ${Utils.getCurrentDate()}`;
+    doc.text(dataDoc, pw / 2, y, { align: 'center' }); y += 4;
+    doc.text('Conferido por', pw / 2, y, { align: 'center' }); y += 16;
+
+    // Assinatura DIRECTOR à DIREITA
+    const dirLabel = diretor ? (diretor.sexo === 'F' ? 'A Directora' : 'O Director') : 'O Director';
+    doc.setFontSize(9);
+    doc.text(dirLabel, pw - 55, y, { align: 'center' });
+    doc.line(pw - 85, y + 10, pw - 25, y + 10);
+    doc.setFont('helvetica', 'bold');
+    doc.text(dirNome, pw - 55, y + 15, { align: 'center' });
+  }
+};
+
+// ============ VERIFICAÇÃO ============
+console.log('%c✅ Módulo Certificados COMPLETAMENTE REESCRITO!', 'color:#059669;font-weight:bold;font-size:14px');
+console.log('  ✓ loadAllData: carrega classes, turmas, disciplinas, alunos, anos');
+console.log('  ✓ populateFilters: lista classes finais com contagem de alunos');
+console.log('  ✓ onClasseChange: lista turmas com curso, turno e contagem');
+console.log('  ✓ searchAluno: pesquisa em todas classes finais');
+console.log('  ✓ gerar: certificados em lote por classe/turma/ano');
+console.log('  ✓ gerarIndividual: certificado individual');
+console.log('  ✓ _renderCertificadoPage: insígnia, médias arredondadas, extenso');
+console.log('  ✓ Director à direita na assinatura');
+console.log('  ✓ Data com nome da província/escola');
+</script>
 </body>
 </html>
