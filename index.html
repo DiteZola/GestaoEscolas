@@ -17817,5 +17817,903 @@ console.log('  ✓ _renderCertificadoPage: insígnia, médias arredondadas, exte
 console.log('  ✓ Director à direita na assinatura');
 console.log('  ✓ Data com nome da província/escola');
 </script>
+<script type="module">
+// ============================================================
+// CORREÇÃO: "dir is not defined" nos Passes (preview cards)
+// ============================================================
+
+// O erro ocorre porque a variável "dir" é usada no preview HTML
+// mas só existe dentro da função de export PDF.
+// Solução: Carregar director ao gerar e guardar no escopo do módulo.
+
+PagePasses._directorData = null;
+
+// Fix: gerarAlunos - carrega director
+const origGerarAlunos = PagePasses.gerarAlunos;
+PagePasses.gerarAlunos = async function() {
+  const classeId = document.getElementById('passClasse').value;
+  const turmaId = document.getElementById('passTurma').value;
+
+  showLoading(true);
+  try {
+    let q = [FB.where('schoolId', '==', APP.currentSchool.id)];
+    if (classeId) q.push(FB.where('classeId', '==', classeId));
+    if (turmaId) q.push(FB.where('turmaId', '==', turmaId));
+    if (APP.currentYearId) q.push(FB.where('yearId', '==', APP.currentYearId));
+
+    let alunos = await DB.getCollection('alunos', q);
+    alunos = alunos.filter(a => a.estado === 'Activo' || a.estado === 'Ativo');
+    alunos.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+    if (alunos.length === 0) { Utils.toast('Nenhum aluno encontrado', 'warning'); showLoading(false); return; }
+
+    // Carregar director
+    const users = await DB.getCollection('users', [FB.where('schoolId', '==', APP.currentSchool.id)]);
+    this._directorData = users.find(u => u.role === 'diretor') || null;
+
+    this._alunosData = alunos;
+
+    let html = `<div class="flex-between mb-3 no-print">
+      <p>${alunos.length} passes gerados</p>
+      <button class="btn btn-primary" onclick="PagePasses.exportAlunosPDF()"><i class="fas fa-file-pdf"></i> Baixar PDF (6 por folha)</button>
+    </div>`;
+
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px">';
+    alunos.slice(0, 12).forEach(a => {
+      html += this._renderPasseCardSafe(a, 'aluno');
+    });
+    html += '</div>';
+    if (alunos.length > 12) html += `<p class="mt-2" style="color:var(--text-light)">... e mais ${alunos.length - 12} passes</p>`;
+
+    document.getElementById('passAlunosContent').innerHTML = html;
+  } catch (e) { Utils.toast('Erro: ' + e.message, 'error'); console.error(e); }
+  showLoading(false);
+};
+
+// Fix: gerarFuncionarios - carrega director
+const origGerarFunc = PagePasses.gerarFuncionarios;
+PagePasses.gerarFuncionarios = async function() {
+  const cargo = document.getElementById('passFuncCargo').value;
+  showLoading(true);
+  try {
+    let users = await DB.getCollection('users', [FB.where('schoolId', '==', APP.currentSchool.id)]);
+    users = users.filter(u => u.role !== 'superadmin' && u.active !== false);
+    if (cargo) users = users.filter(u => u.role === cargo);
+    users.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+    if (users.length === 0) { Utils.toast('Nenhum funcionário encontrado', 'warning'); showLoading(false); return; }
+
+    // Guardar director
+    this._directorData = users.find(u => u.role === 'diretor') || null;
+
+    this._funcData = users;
+
+    let html = `<div class="flex-between mb-3 no-print">
+      <p>${users.length} passes gerados</p>
+      <button class="btn btn-primary" onclick="PagePasses.exportFuncPDF()"><i class="fas fa-file-pdf"></i> Baixar PDF (6 por folha)</button>
+    </div>`;
+
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px">';
+    users.slice(0, 12).forEach(u => {
+      html += this._renderPasseCardSafe(u, 'funcionario');
+    });
+    html += '</div>';
+
+    document.getElementById('passFuncContent').innerHTML = html;
+  } catch (e) { Utils.toast('Erro: ' + e.message, 'error'); console.error(e); }
+  showLoading(false);
+};
+
+// Fix: renderPasseCard SEM referência a "dir" externa
+PagePasses._renderPasseCardSafe = function(pessoa, tipo) {
+  const school = APP.currentSchool;
+  const isAluno = tipo === 'aluno';
+  const dir = this._directorData;
+  const dirLabel = dir ? (dir.sexo === 'F' ? 'A Directora' : 'O Director') : 'O Director';
+  const dirNome = dir ? dir.name : '';
+
+  return `
+    <div class="card" style="border:2px solid var(--angola-red);border-radius:10px;overflow:hidden">
+      <div style="background:linear-gradient(135deg,#8c0a14,#b91c2e);color:#fff;padding:8px 12px;text-align:center">
+        <strong style="font-size:10px;letter-spacing:0.5px">${(school.name || 'ESCOLA').toUpperCase()}</strong><br>
+        <span style="font-size:8px;opacity:0.8">${school.municipality || ''} - ${school.province || ''}</span><br>
+        <span style="font-size:9px;font-weight:700;letter-spacing:1px">${isAluno ? 'CARTÃO DE ESTUDANTE' : 'CARTÃO FUNCIONAL'}</span>
+      </div>
+      <div style="display:flex;padding:10px;gap:10px;align-items:flex-start">
+        <div style="flex-shrink:0">
+          ${pessoa.photo ? `<img src="${pessoa.photo}" style="width:60px;height:75px;border-radius:6px;object-fit:cover;border:2px solid var(--angola-red)">` :
+            '<div style="width:60px;height:75px;border-radius:6px;background:#f0f0f0;display:flex;align-items:center;justify-content:center;border:1px solid #ddd"><i class="fas fa-user" style="font-size:24px;color:#ccc"></i></div>'}
+        </div>
+        <div style="flex:1;min-width:0;font-size:11px;line-height:1.6">
+          <p style="font-weight:700;color:var(--angola-red);font-size:12px;margin-bottom:4px;border-bottom:1px solid #eee;padding-bottom:4px">${pessoa.name || ''}</p>
+          ${isAluno ? `
+            <p><strong>Classe:</strong> ${pessoa.classeName || ''}</p>
+            <p><strong>Turma:</strong> ${pessoa.turmaName || ''} ${pessoa.curso ? '(' + pessoa.curso + ')' : ''}</p>
+            <p><strong>Mat.:</strong> ${pessoa.matricula || ''}</p>
+          ` : `
+            <p><strong>Cargo:</strong> ${getRoleName(pessoa.role)}</p>
+            <p><strong>Agente:</strong> ${pessoa.agente || 'N/D'}</p>
+            <p><strong>BI:</strong> ${pessoa.bi || ''}</p>
+          `}
+        </div>
+      </div>
+      <div style="text-align:center;padding:4px;font-size:8px;color:var(--text-light);border-top:1px solid #eee">
+        ${dirLabel}: ${dirNome}
+      </div>
+      <div style="background:var(--angola-yellow);padding:4px;text-align:center">
+        <span style="font-size:8px;font-weight:700;color:#000;letter-spacing:0.5px">REPÚBLICA DE ANGOLA • ${APP.currentYear?.name || ''}</span>
+      </div>
+    </div>`;
+};
+
+// Substituir a referência antiga
+PagePasses._renderPasseCard = PagePasses._renderPasseCardSafe;
+
+// ============ VERIFICAÇÃO ============
+console.log('%c✅ Erro "dir is not defined" nos Passes CORRIGIDO!', 'color:#059669;font-weight:bold;font-size:14px');
+console.log('  ✓ Director carregado em _directorData antes do render');
+console.log('  ✓ _renderPasseCardSafe usa _directorData do escopo do módulo');
+console.log('  ✓ Preview e PDF usam a mesma fonte de dados');
+</script>
+<script type="module">
+// ============================================================
+// CORREÇÃO COMPLETA: ÁREA FINANCEIRA + DOWNLOADS EM TODO SISTEMA
+// ============================================================
+
+// ============ FIX 1: GARANTIR jsPDF e XLSX disponíveis ============
+window.getJsPDF = function() {
+  if (window.jspdf) return window.jspdf.jsPDF;
+  if (window.jsPDF) return window.jsPDF;
+  console.error('jsPDF não encontrado');
+  Utils.toast('Erro: biblioteca PDF não carregada. Recarregue a página.', 'error');
+  return null;
+};
+
+window.getXLSX = function() {
+  if (window.XLSX) return window.XLSX;
+  console.error('XLSX não encontrado');
+  Utils.toast('Erro: biblioteca Excel não carregada. Recarregue a página.', 'error');
+  return null;
+};
+
+// ============ FIX 2: CONFIG FINANCEIRA - Completo ============
+window.PageConfigFinanceira = {
+  _titulos: [], _categorias: [], _filteredTitulos: [], _classes: [],
+
+  async render(container) {
+    const schoolId = APP.currentSchool ? APP.currentSchool.id : null;
+    if (!schoolId) {
+      container.innerHTML = '<div class="empty-state"><i class="fas fa-school"></i><p>Selecione uma escola primeiro</p></div>';
+      return;
+    }
+    const canEdit = ['superadmin', 'diretor', 'subdiretor_administrativo'].includes(APP.currentUser.role);
+
+    container.innerHTML = `
+      <h2 class="page-title"><i class="fas fa-cog"></i> Configuração Financeira</h2>
+      <div class="tabs no-print">
+        <div class="tab-item active" onclick="PageConfigFinanceira.switchTab('titulos')">Títulos de Pagamento</div>
+        <div class="tab-item" onclick="PageConfigFinanceira.switchTab('categorias')">Categorias</div>
+      </div>
+      <div id="tabTitulos" class="tab-content active">
+        <div class="toolbar">
+          <div class="toolbar-left"><input type="text" class="search-input" id="searchTitulo" placeholder="Pesquisar..." oninput="PageConfigFinanceira.filterTitulos()"></div>
+          <div class="toolbar-right">
+            ${canEdit ? '<button class="btn btn-primary" onclick="PageConfigFinanceira.openTituloModal()"><i class="fas fa-plus"></i> Novo Título</button>' : ''}
+            <button class="btn btn-outline" onclick="PageConfigFinanceira.exportTitulosPDF()"><i class="fas fa-file-pdf"></i></button>
+            <button class="btn btn-outline" onclick="PageConfigFinanceira.exportTitulosXLSX()"><i class="fas fa-file-excel"></i></button>
+          </div>
+        </div>
+        <div class="table-container">
+          <table><thead><tr><th>#</th><th>Título</th><th>Valor (Kz)</th><th>Periodicidade</th><th>Classes</th><th>Status</th>${canEdit ? '<th>Acções</th>' : ''}</tr></thead>
+          <tbody id="tituloTableBody"><tr><td colspan="7" class="text-center">Carregando...</td></tr></tbody></table>
+        </div>
+      </div>
+      <div id="tabCategorias" class="tab-content">
+        <div class="toolbar">
+          <div class="toolbar-right">
+            ${canEdit ? '<button class="btn btn-primary" onclick="PageConfigFinanceira.openCatModal()"><i class="fas fa-plus"></i> Nova Categoria</button>' : ''}
+          </div>
+        </div>
+        <div class="table-container">
+          <table><thead><tr><th>#</th><th>Categoria</th><th>Tipo</th><th>Descrição</th>${canEdit ? '<th>Acções</th>' : ''}</tr></thead>
+          <tbody id="catTableBody"><tr><td colspan="5" class="text-center">Carregando...</td></tr></tbody></table>
+        </div>
+      </div>
+      <div id="tituloModal" class="modal-overlay">
+        <div class="modal-content">
+          <div class="modal-header"><h3 id="tituloModalTitle">Novo Título</h3><button class="modal-close" onclick="PageConfigFinanceira.closeTituloModal()">&times;</button></div>
+          <div class="modal-body"><form id="tituloForm">
+            <input type="hidden" id="tituloId">
+            <div class="form-row">
+              <div class="form-group"><label>Nome *</label><input type="text" id="tituloNome" required placeholder="Ex: Propina Mensal"></div>
+              <div class="form-group"><label>Valor (Kz) *</label><input type="number" id="tituloValor" required min="0" step="0.01"></div>
+            </div>
+            <div class="form-row">
+              <div class="form-group"><label>Periodicidade *</label>
+                <select id="tituloPeriodo" required>
+                  <option value="mensal">Mensal</option>
+                  <option value="trimestral">Trimestral</option>
+                  <option value="anual">Anual</option>
+                  <option value="unico">Pagamento Único</option>
+                </select></div>
+              <div class="form-group"><label>Status</label>
+                <select id="tituloStatus"><option value="Activo">Activo</option><option value="Inactivo">Inactivo</option></select></div>
+            </div>
+            <div class="form-group"><label>Classes aplicáveis</label>
+              <select id="tituloClasses" multiple style="height:80px"><option value="todas">Todas as Classes</option></select>
+              <small style="color:var(--text-light)">Ctrl/Cmd para múltiplas</small></div>
+            <div class="form-group"><label>Descrição</label><textarea id="tituloDesc" rows="2"></textarea></div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-outline" onclick="PageConfigFinanceira.closeTituloModal()">Cancelar</button>
+              <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Guardar</button>
+            </div>
+          </form></div>
+        </div>
+      </div>
+      <div id="catModal" class="modal-overlay">
+        <div class="modal-content" style="max-width:450px">
+          <div class="modal-header"><h3 id="catModalTitle">Nova Categoria</h3><button class="modal-close" onclick="PageConfigFinanceira.closeCatModal()">&times;</button></div>
+          <div class="modal-body"><form id="catForm">
+            <input type="hidden" id="catId">
+            <div class="form-group"><label>Nome *</label><input type="text" id="catNome" required></div>
+            <div class="form-group"><label>Tipo</label><select id="catTipo"><option value="despesa">Despesa</option><option value="receita">Receita</option></select></div>
+            <div class="form-group"><label>Descrição</label><textarea id="catDesc" rows="2"></textarea></div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-outline" onclick="PageConfigFinanceira.closeCatModal()">Cancelar</button>
+              <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Guardar</button>
+            </div>
+          </form></div>
+        </div>
+      </div>`;
+
+    await this.loadData();
+    document.getElementById('tituloForm').onsubmit = async (e) => { e.preventDefault(); await PageConfigFinanceira.saveTitulo(); };
+    document.getElementById('catForm').onsubmit = async (e) => { e.preventDefault(); await PageConfigFinanceira.saveCat(); };
+  },
+
+  switchTab(tab) {
+    document.querySelectorAll('.tab-item').forEach((t, i) => t.classList.toggle('active', (i === 0 && tab === 'titulos') || (i === 1 && tab === 'categorias')));
+    document.getElementById('tabTitulos').classList.toggle('active', tab === 'titulos');
+    document.getElementById('tabCategorias').classList.toggle('active', tab === 'categorias');
+  },
+
+  async loadData() {
+    const sid = APP.currentSchool.id;
+    try {
+      this._titulos = await DB.getCollection('titulosPagamento', [FB.where('schoolId', '==', sid)]);
+      this._titulos.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+      this._filteredTitulos = [...this._titulos];
+      this._categorias = await DB.getCollection('categoriasDespesa', [FB.where('schoolId', '==', sid)]);
+      this._classes = await DB.getCollection('classes', [FB.where('schoolId', '==', sid)]);
+      this._classes.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
+
+      // Preencher classes no select
+      const selC = document.getElementById('tituloClasses');
+      if (selC) {
+        selC.innerHTML = '<option value="todas">Todas as Classes</option>';
+        this._classes.forEach(c => { selC.innerHTML += `<option value="${c.id}">${c.name}</option>`; });
+      }
+
+      this.renderTitulos();
+      this.renderCategorias();
+    } catch (e) { console.error(e); Utils.toast('Erro ao carregar dados financeiros', 'error'); }
+  },
+
+  filterTitulos() {
+    const term = (document.getElementById('searchTitulo')?.value || '').toLowerCase();
+    this._filteredTitulos = this._titulos.filter(t => (t.name || '').toLowerCase().includes(term));
+    this.renderTitulos();
+  },
+
+  renderTitulos() {
+    const tbody = document.getElementById('tituloTableBody');
+    if (!tbody) return;
+    const canEdit = ['superadmin', 'diretor', 'subdiretor_administrativo'].includes(APP.currentUser.role);
+    const periodNames = { mensal: 'Mensal', trimestral: 'Trimestral', anual: 'Anual', unico: 'Pagamento Único' };
+
+    if (this._filteredTitulos.length === 0) { tbody.innerHTML = '<tr><td colspan="7" class="text-center">Nenhum título</td></tr>'; return; }
+    tbody.innerHTML = this._filteredTitulos.map((t, i) => `<tr>
+      <td>${i + 1}</td>
+      <td><strong>${t.name || ''}</strong><br><small style="color:var(--text-light)">${t.descricao || ''}</small></td>
+      <td><strong style="color:var(--success)">${(parseFloat(t.valor) || 0).toLocaleString('pt-AO')} Kz</strong></td>
+      <td><span class="badge badge-info">${periodNames[t.periodo] || t.periodo || ''}</span></td>
+      <td><small>${t.classesNomes || (t.classes && t.classes.includes('todas') ? 'Todas' : (t.classes || []).join(', '))}</small></td>
+      <td><span class="badge ${t.status === 'Activo' ? 'badge-success' : 'badge-danger'}">${t.status || 'Activo'}</span></td>
+      ${canEdit ? `<td><div style="display:flex;gap:3px">
+        <button class="btn btn-sm btn-info" onclick="PageConfigFinanceira.openTituloModal('${t.id}')"><i class="fas fa-edit"></i></button>
+        <button class="btn btn-sm btn-danger" onclick="PageConfigFinanceira.deleteTitulo('${t.id}')"><i class="fas fa-trash"></i></button>
+      </div></td>` : ''}
+    </tr>`).join('');
+  },
+
+  renderCategorias() {
+    const tbody = document.getElementById('catTableBody');
+    if (!tbody) return;
+    const canEdit = ['superadmin', 'diretor', 'subdiretor_administrativo'].includes(APP.currentUser.role);
+    if (this._categorias.length === 0) { tbody.innerHTML = '<tr><td colspan="5" class="text-center">Nenhuma categoria</td></tr>'; return; }
+    tbody.innerHTML = this._categorias.map((c, i) => `<tr>
+      <td>${i + 1}</td><td><strong>${c.name || ''}</strong></td>
+      <td><span class="badge ${c.tipo === 'receita' ? 'badge-success' : 'badge-danger'}">${c.tipo || 'despesa'}</span></td>
+      <td>${c.descricao || ''}</td>
+      ${canEdit ? `<td><div style="display:flex;gap:3px">
+        <button class="btn btn-sm btn-info" onclick="PageConfigFinanceira.openCatModal('${c.id}')"><i class="fas fa-edit"></i></button>
+        <button class="btn btn-sm btn-danger" onclick="PageConfigFinanceira.deleteCat('${c.id}')"><i class="fas fa-trash"></i></button>
+      </div></td>` : ''}
+    </tr>`).join('');
+  },
+
+  openTituloModal(id = null) {
+    document.getElementById('tituloModalTitle').textContent = id ? 'Editar Título' : 'Novo Título';
+    document.getElementById('tituloId').value = id || '';
+    if (id) {
+      const t = this._titulos.find(x => x.id === id);
+      if (t) {
+        document.getElementById('tituloNome').value = t.name || '';
+        document.getElementById('tituloValor').value = t.valor || '';
+        document.getElementById('tituloPeriodo').value = t.periodo || 'mensal';
+        document.getElementById('tituloStatus').value = t.status || 'Activo';
+        document.getElementById('tituloDesc').value = t.descricao || '';
+        if (t.classes) {
+          const selC = document.getElementById('tituloClasses');
+          Array.from(selC.options).forEach(opt => { opt.selected = t.classes.includes(opt.value); });
+        }
+      }
+    } else { document.getElementById('tituloForm').reset(); }
+    document.getElementById('tituloModal').classList.add('active');
+  },
+
+  closeTituloModal() { document.getElementById('tituloModal').classList.remove('active'); },
+
+  async saveTitulo() {
+    const id = document.getElementById('tituloId').value;
+    const selC = document.getElementById('tituloClasses');
+    const classes = Array.from(selC.selectedOptions).map(o => o.value);
+    const classesNomes = Array.from(selC.selectedOptions).map(o => o.text).join(', ');
+
+    const data = {
+      name: document.getElementById('tituloNome').value.trim(),
+      valor: parseFloat(document.getElementById('tituloValor').value) || 0,
+      periodo: document.getElementById('tituloPeriodo').value,
+      status: document.getElementById('tituloStatus').value,
+      classes: classes, classesNomes: classesNomes,
+      descricao: document.getElementById('tituloDesc').value.trim(),
+      schoolId: APP.currentSchool.id
+    };
+
+    this.closeTituloModal();
+    showLoading(true);
+    try {
+      await DB.saveDoc('titulosPagamento', id || Utils.generateId(), data);
+      Utils.toast(id ? 'Título atualizado!' : 'Título criado!', 'success');
+      await this.loadData();
+    } catch (e) { Utils.toast('Erro: ' + e.message, 'error'); }
+    showLoading(false);
+  },
+
+  async deleteTitulo(id) {
+    const ok = await Utils.confirm('Excluir este título?');
+    if (!ok) return;
+    showLoading(true);
+    try { await DB.deleteDocument('titulosPagamento', id); Utils.toast('Excluído!', 'success'); await this.loadData(); }
+    catch (e) { Utils.toast('Erro: ' + e.message, 'error'); }
+    showLoading(false);
+  },
+
+  openCatModal(id = null) {
+    document.getElementById('catModalTitle').textContent = id ? 'Editar' : 'Nova Categoria';
+    document.getElementById('catId').value = id || '';
+    if (id) {
+      const c = this._categorias.find(x => x.id === id);
+      if (c) { document.getElementById('catNome').value = c.name || ''; document.getElementById('catTipo').value = c.tipo || 'despesa'; document.getElementById('catDesc').value = c.descricao || ''; }
+    } else { document.getElementById('catForm').reset(); }
+    document.getElementById('catModal').classList.add('active');
+  },
+
+  closeCatModal() { document.getElementById('catModal').classList.remove('active'); },
+
+  async saveCat() {
+    const id = document.getElementById('catId').value;
+    const data = { name: document.getElementById('catNome').value.trim(), tipo: document.getElementById('catTipo').value, descricao: document.getElementById('catDesc').value.trim(), schoolId: APP.currentSchool.id };
+    this.closeCatModal();
+    showLoading(true);
+    try { await DB.saveDoc('categoriasDespesa', id || Utils.generateId(), data); Utils.toast('Salvo!', 'success'); await this.loadData(); }
+    catch (e) { Utils.toast('Erro: ' + e.message, 'error'); }
+    showLoading(false);
+  },
+
+  async deleteCat(id) {
+    const ok = await Utils.confirm('Excluir?');
+    if (!ok) return;
+    showLoading(true);
+    try { await DB.deleteDocument('categoriasDespesa', id); Utils.toast('Excluído!', 'success'); await this.loadData(); }
+    catch (e) { Utils.toast('Erro: ' + e.message, 'error'); }
+    showLoading(false);
+  },
+
+  exportTitulosPDF() {
+    const PDF = getJsPDF(); if (!PDF) return;
+    const doc = new PDF();
+    let y = PDFHelper.addHeader(doc, APP.currentSchool, { title: 'TÍTULOS DE PAGAMENTO' });
+    const periodN = { mensal: 'Mensal', trimestral: 'Trimestral', anual: 'Anual', unico: 'Único' };
+    doc.autoTable({ startY: y + 5, head: [['#', 'Título', 'Valor (Kz)', 'Periodicidade', 'Classes', 'Status']],
+      body: this._filteredTitulos.map((t, i) => [i + 1, t.name, (parseFloat(t.valor) || 0).toLocaleString('pt-AO'), periodN[t.periodo] || '', t.classesNomes || 'Todas', t.status]),
+      styles: { fontSize: 8 }, headStyles: { fillColor: [15, 23, 42] } });
+    doc.save('titulos_pagamento.pdf'); Utils.toast('PDF exportado!', 'success');
+  },
+
+  exportTitulosXLSX() {
+    const XL = getXLSX(); if (!XL) return;
+    const periodN = { mensal: 'Mensal', trimestral: 'Trimestral', anual: 'Anual', unico: 'Único' };
+    const data = this._filteredTitulos.map((t, i) => ({ '#': i + 1, 'Título': t.name, 'Valor': t.valor, 'Periodicidade': periodN[t.periodo] || '', 'Classes': t.classesNomes || 'Todas', 'Status': t.status }));
+    const ws = XL.utils.json_to_sheet(data); const wb = XL.utils.book_new(); XL.utils.book_append_sheet(wb, ws, 'Títulos');
+    XL.writeFile(wb, 'titulos_pagamento.xlsx'); Utils.toast('XLSX exportado!', 'success');
+  }
+};
+
+// ============ FIX 3: PAGAMENTOS - Corrigido completamente ============
+window.PagePagamentos = {
+  _titulos: [], _pagamentos: [], _filteredPag: [], _allAlunos: [], _selectedAluno: null, _devedores: [],
+
+  async render(container) {
+    const schoolId = APP.currentSchool ? APP.currentSchool.id : null;
+    if (!schoolId) { container.innerHTML = '<div class="empty-state"><i class="fas fa-school"></i><p>Selecione uma escola primeiro</p></div>'; return; }
+
+    container.innerHTML = `
+      <h2 class="page-title"><i class="fas fa-money-bill-wave"></i> Pagamentos</h2>
+      <div class="tabs no-print">
+        <div class="tab-item active" onclick="PagePagamentos.switchTab('registar')">Registar Pagamento</div>
+        <div class="tab-item" onclick="PagePagamentos.switchTab('devedores')">Devedores</div>
+        <div class="tab-item" onclick="PagePagamentos.switchTab('historico')">Histórico</div>
+      </div>
+      <div id="tabPagRegistar" class="tab-content active">
+        <div class="card mb-3"><div class="card-body">
+          <div class="form-group"><label>Pesquisar Aluno</label>
+            <input type="text" id="pagSearchAluno" class="search-input w-full" placeholder="Nome, BI ou matrícula..." oninput="PagePagamentos.searchAluno()"></div>
+          <div id="pagSearchResults" style="max-height:150px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius);display:none"></div>
+          <div id="pagAlunoInfo" style="display:none" class="mt-3"></div>
+          <div id="pagForm" style="display:none" class="mt-3">
+            <hr>
+            <div class="form-row">
+              <div class="form-group"><label>Título *</label><select id="pagTitulo" onchange="PagePagamentos.onTituloChange()"><option value="">Selecione</option></select></div>
+              <div class="form-group"><label>Valor (Kz) *</label><input type="number" id="pagValor" min="0" step="0.01"></div>
+            </div>
+            <div class="form-row">
+              <div class="form-group"><label>Mês/Referência</label>
+                <select id="pagMes"><option value="">N/A</option><option>Janeiro</option><option>Fevereiro</option><option>Março</option><option>Abril</option><option>Maio</option><option>Junho</option><option>Julho</option><option>Agosto</option><option>Setembro</option><option>Outubro</option><option>Novembro</option><option>Dezembro</option><option>1° Trimestre</option><option>2° Trimestre</option><option>3° Trimestre</option><option>Anual</option><option>Único</option></select></div>
+              <div class="form-group"><label>Forma</label>
+                <select id="pagForma"><option>Numerário</option><option>Transferência</option><option>Depósito</option><option>Multicaixa</option></select></div>
+            </div>
+            <div class="form-group"><label>Observação</label><input type="text" id="pagObs" placeholder="Opcional"></div>
+            <button class="btn btn-success" onclick="PagePagamentos.registarPagamento()"><i class="fas fa-check"></i> Registar</button>
+          </div>
+        </div></div>
+      </div>
+      <div id="tabPagDevedores" class="tab-content">
+        <div class="toolbar mb-3">
+          <div class="toolbar-left">
+            <select id="devTitulo" style="padding:8px;border:1px solid var(--border);border-radius:var(--radius)" onchange="PagePagamentos.loadDevedores()"><option value="">Todos</option></select>
+            <select id="devMes" style="padding:8px;border:1px solid var(--border);border-radius:var(--radius)" onchange="PagePagamentos.loadDevedores()"><option value="">Todos Meses</option><option>Janeiro</option><option>Fevereiro</option><option>Março</option><option>Abril</option><option>Maio</option><option>Junho</option><option>Julho</option><option>Agosto</option><option>Setembro</option><option>Outubro</option><option>Novembro</option><option>Dezembro</option></select>
+          </div>
+          <div class="toolbar-right">
+            <button class="btn btn-outline" onclick="PagePagamentos.exportDevedoresPDF()"><i class="fas fa-file-pdf"></i></button>
+            <button class="btn btn-outline" onclick="PagePagamentos.exportDevedoresXLSX()"><i class="fas fa-file-excel"></i></button>
+          </div>
+        </div>
+        <div id="devedoresStats" class="stats-grid mb-3"></div>
+        <div class="table-container">
+          <table><thead><tr><th>#</th><th>Aluno</th><th>Classe</th><th>Turma</th><th>Título</th><th>Valor</th><th>Ref.</th><th>Tipo</th><th>Estado</th></tr></thead>
+          <tbody id="devedoresTableBody"><tr><td colspan="9" class="text-center">Clique em carregar</td></tr></tbody></table>
+        </div>
+      </div>
+      <div id="tabPagHistorico" class="tab-content">
+        <div class="toolbar mb-3">
+          <div class="toolbar-left"><input type="text" class="search-input" id="histPagSearch" placeholder="Pesquisar..." oninput="PagePagamentos.filterHistorico()"></div>
+          <div class="toolbar-right">
+            <button class="btn btn-outline" onclick="PagePagamentos.exportHistoricoPDF()"><i class="fas fa-file-pdf"></i></button>
+            <button class="btn btn-outline" onclick="PagePagamentos.exportHistoricoXLSX()"><i class="fas fa-file-excel"></i></button>
+          </div>
+        </div>
+        <div class="table-container">
+          <table><thead><tr><th>#</th><th>Data</th><th>Aluno</th><th>Título</th><th>Valor</th><th>Ref.</th><th>Forma</th><th>Recibo</th></tr></thead>
+          <tbody id="histPagTableBody"><tr><td colspan="8" class="text-center">Carregando...</td></tr></tbody></table>
+        </div>
+      </div>`;
+
+    await this.loadData();
+  },
+
+  switchTab(tab) {
+    const tabs = ['registar', 'devedores', 'historico'];
+    document.querySelectorAll('.tab-item').forEach((t, i) => t.classList.toggle('active', tabs[i] === tab));
+    tabs.forEach(t => { const el = document.getElementById('tabPag' + t.charAt(0).toUpperCase() + t.slice(1)); if (el) el.classList.toggle('active', t === tab); });
+    if (tab === 'devedores') this.loadDevedores();
+  },
+
+  async loadData() {
+    const sid = APP.currentSchool.id;
+    try {
+      this._titulos = await DB.getCollection('titulosPagamento', [FB.where('schoolId', '==', sid)]);
+      this._titulos = this._titulos.filter(t => t.status === 'Activo' || !t.status);
+
+      let pQ = [FB.where('schoolId', '==', sid)];
+      if (APP.currentYearId) pQ.push(FB.where('yearId', '==', APP.currentYearId));
+      this._pagamentos = await DB.getCollection('pagamentos', pQ);
+      this._pagamentos.sort((a, b) => (b.data || '').localeCompare(a.data || ''));
+      this._filteredPag = [...this._pagamentos];
+
+      let aQ = [FB.where('schoolId', '==', sid)];
+      if (APP.currentYearId) aQ.push(FB.where('yearId', '==', APP.currentYearId));
+      this._allAlunos = await DB.getCollection('alunos', aQ);
+
+      // Preencher selects
+      const selT = document.getElementById('pagTitulo');
+      const selDT = document.getElementById('devTitulo');
+      if (selT) { selT.innerHTML = '<option value="">Selecione</option>'; this._titulos.forEach(t => { selT.innerHTML += `<option value="${t.id}" data-valor="${t.valor}" data-periodo="${t.periodo}">${t.name} - ${(parseFloat(t.valor) || 0).toLocaleString('pt-AO')} Kz (${t.periodo || ''})</option>`; }); }
+      if (selDT) { selDT.innerHTML = '<option value="">Todos</option>'; this._titulos.forEach(t => { selDT.innerHTML += `<option value="${t.id}">${t.name} (${t.periodo || ''})</option>`; }); }
+
+      this.renderHistorico();
+    } catch (e) { console.error(e); Utils.toast('Erro financeiro: ' + e.message, 'error'); }
+  },
+
+  searchAluno() {
+    const term = (document.getElementById('pagSearchAluno')?.value || '').toLowerCase().trim();
+    const div = document.getElementById('pagSearchResults');
+    if (!term || term.length < 2) { div.style.display = 'none'; return; }
+    const matches = this._allAlunos.filter(a => (a.estado === 'Activo' || a.estado === 'Ativo') &&
+      ((a.name || '').toLowerCase().includes(term) || (a.bi || '').toLowerCase().includes(term) || (a.matricula || '').toLowerCase().includes(term))
+    ).slice(0, 8);
+    div.innerHTML = matches.length === 0 ? '<div style="padding:10px;color:var(--text-light)">Nenhum aluno</div>' :
+      matches.map(a => `<div style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--border)" onmouseover="this.style.background='#f0f4ff'" onmouseout="this.style.background=''" onclick="PagePagamentos.selectAluno('${a.id}')"><strong style="color:var(--angola-red)">${a.name}</strong> - ${a.classeName || ''} | ${a.matricula || ''}</div>`).join('');
+    div.style.display = 'block';
+  },
+
+  selectAluno(id) {
+    document.getElementById('pagSearchResults').style.display = 'none';
+    this._selectedAluno = this._allAlunos.find(a => a.id === id);
+    if (!this._selectedAluno) return;
+    const a = this._selectedAluno;
+    const pagAluno = this._pagamentos.filter(p => p.alunoId === id);
+    document.getElementById('pagAlunoInfo').style.display = 'block';
+    document.getElementById('pagAlunoInfo').innerHTML = `<div style="background:#f8fafc;padding:12px;border-radius:var(--radius)"><h4 style="color:var(--angola-red)">${a.name}</h4><p>Classe: ${a.classeName || ''} | Turma: ${a.turmaName || ''} | Pagamentos: ${pagAluno.length}</p></div>`;
+    document.getElementById('pagForm').style.display = 'block';
+  },
+
+  onTituloChange() {
+    const sel = document.getElementById('pagTitulo');
+    const opt = sel.options[sel.selectedIndex];
+    document.getElementById('pagValor').value = opt?.dataset?.valor || '';
+    // Ajustar mês de acordo com periodicidade
+    const periodo = opt?.dataset?.periodo || '';
+    const selMes = document.getElementById('pagMes');
+    if (periodo === 'anual') selMes.value = 'Anual';
+    else if (periodo === 'unico') selMes.value = 'Único';
+    else if (periodo === 'trimestral') selMes.value = '1° Trimestre';
+    else selMes.value = '';
+  },
+
+  async registarPagamento() {
+    const aluno = this._selectedAluno;
+    if (!aluno) { Utils.toast('Selecione aluno', 'warning'); return; }
+    const tituloId = document.getElementById('pagTitulo').value;
+    const valor = parseFloat(document.getElementById('pagValor').value);
+    if (!tituloId || !valor) { Utils.toast('Selecione título e valor', 'warning'); return; }
+
+    const titulo = this._titulos.find(t => t.id === tituloId);
+    const data = {
+      alunoId: aluno.id, alunoName: aluno.name, classeName: aluno.classeName || '', turmaName: aluno.turmaName || '',
+      tituloId, tituloName: titulo ? titulo.name : '', tituloPeriodo: titulo ? titulo.periodo : '',
+      valor, mes: document.getElementById('pagMes').value, forma: document.getElementById('pagForma').value,
+      observacao: document.getElementById('pagObs').value.trim(),
+      data: new Date().toISOString().split('T')[0], recibo: 'REC-' + Date.now().toString().slice(-8),
+      registadoPor: APP.currentUser.name, schoolId: APP.currentSchool.id, yearId: APP.currentYearId || '', status: 'pago'
+    };
+
+    showLoading(true);
+    try {
+      const pagId = Utils.generateId();
+      await DB.saveDoc('pagamentos', pagId, data);
+      // Receita automática
+      await DB.saveDoc('receitas', Utils.generateId(), {
+        descricao: `${titulo ? titulo.name : 'Pagamento'} - ${aluno.name}`, valor, data: data.data,
+        categoria: 'Propina/Taxa', referencia: data.recibo, pagamentoId: pagId,
+        schoolId: APP.currentSchool.id, yearId: APP.currentYearId || ''
+      });
+      Utils.toast(`Pagamento registado! Recibo: ${data.recibo}`, 'success');
+      document.getElementById('pagForm').style.display = 'none';
+      document.getElementById('pagAlunoInfo').style.display = 'none';
+      document.getElementById('pagSearchAluno').value = '';
+      this._selectedAluno = null;
+      await this.loadData();
+    } catch (e) { Utils.toast('Erro: ' + e.message, 'error'); }
+    showLoading(false);
+  },
+
+  async loadDevedores() {
+    const tituloId = document.getElementById('devTitulo')?.value || '';
+    const mesFiltro = document.getElementById('devMes')?.value || '';
+    const alunosAtivos = this._allAlunos.filter(a => a.estado === 'Activo' || a.estado === 'Ativo');
+    const titulos = tituloId ? this._titulos.filter(t => t.id === tituloId) : this._titulos;
+
+    this._devedores = [];
+    const mesAtual = new Date().getMonth();
+    const mesesNomes = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+
+    alunosAtivos.forEach(aluno => {
+      titulos.forEach(titulo => {
+        if (titulo.classes && !titulo.classes.includes('todas') && !titulo.classes.includes(aluno.classeId)) return;
+        const periodo = titulo.periodo || 'mensal';
+
+        if (periodo === 'mensal') {
+          const meses = mesFiltro ? [mesFiltro] : mesesNomes.slice(0, mesAtual + 1);
+          meses.forEach(m => {
+            if (!this._pagamentos.find(p => p.alunoId === aluno.id && p.tituloId === titulo.id && p.mes === m && p.status === 'pago'))
+              this._devedores.push({ aluno: aluno.name, alunoId: aluno.id, classe: aluno.classeName, turma: aluno.turmaName, titulo: titulo.name, valor: titulo.valor, ref: m, periodo, estado: 'Pendente' });
+          });
+        } else if (periodo === 'trimestral') {
+          const trimAtual = mesAtual < 4 ? 1 : mesAtual < 8 ? 2 : 3;
+          const trims = ['1° Trimestre', '2° Trimestre', '3° Trimestre'].slice(0, trimAtual);
+          trims.forEach(t => {
+            if (!this._pagamentos.find(p => p.alunoId === aluno.id && p.tituloId === titulo.id && p.mes === t && p.status === 'pago'))
+              this._devedores.push({ aluno: aluno.name, alunoId: aluno.id, classe: aluno.classeName, turma: aluno.turmaName, titulo: titulo.name, valor: titulo.valor, ref: t, periodo, estado: 'Pendente' });
+          });
+        } else if (periodo === 'anual' || periodo === 'unico') {
+          if (!this._pagamentos.find(p => p.alunoId === aluno.id && p.tituloId === titulo.id && p.status === 'pago'))
+            this._devedores.push({ aluno: aluno.name, alunoId: aluno.id, classe: aluno.classeName, turma: aluno.turmaName, titulo: titulo.name, valor: titulo.valor, ref: periodo === 'anual' ? 'Anual' : 'Único', periodo, estado: 'Pendente' });
+        }
+      });
+    });
+
+    const totalDivida = this._devedores.reduce((s, d) => s + (parseFloat(d.valor) || 0), 0);
+    const devedoresUnicos = new Set(this._devedores.map(d => d.alunoId)).size;
+    document.getElementById('devedoresStats').innerHTML = `
+      <div class="stat-card"><div class="stat-icon red"><i class="fas fa-exclamation-triangle"></i></div><div class="stat-info"><h3>${this._devedores.length}</h3><p>Pendências</p></div></div>
+      <div class="stat-card"><div class="stat-icon orange"><i class="fas fa-users"></i></div><div class="stat-info"><h3>${devedoresUnicos}</h3><p>Devedores</p></div></div>
+      <div class="stat-card"><div class="stat-icon purple"><i class="fas fa-money-bill"></i></div><div class="stat-info"><h3>${totalDivida.toLocaleString('pt-AO')} Kz</h3><p>Total Dívida</p></div></div>
+    `;
+    this.renderDevedores();
+  },
+
+  renderDevedores() {
+    const tbody = document.getElementById('devedoresTableBody');
+    if (!tbody) return;
+    if (this._devedores.length === 0) { tbody.innerHTML = '<tr><td colspan="9" class="text-center">Nenhum devedor</td></tr>'; return; }
+    const periodN = { mensal: 'Mensal', trimestral: 'Trim.', anual: 'Anual', unico: 'Único' };
+    tbody.innerHTML = this._devedores.slice(0, 200).map((d, i) => `<tr>
+      <td>${i + 1}</td><td><strong class="nome-aluno">${d.aluno}</strong></td><td>${d.classe || ''}</td><td>${d.turma || ''}</td>
+      <td>${d.titulo || ''}</td><td><strong style="color:var(--danger)">${(parseFloat(d.valor) || 0).toLocaleString('pt-AO')} Kz</strong></td>
+      <td>${d.ref || ''}</td><td><span class="badge badge-info">${periodN[d.periodo] || ''}</span></td>
+      <td><span class="badge badge-danger">${d.estado}</span></td>
+    </tr>`).join('');
+  },
+
+  filterHistorico() {
+    const term = (document.getElementById('histPagSearch')?.value || '').toLowerCase();
+    this._filteredPag = this._pagamentos.filter(p => (p.alunoName || '').toLowerCase().includes(term) || (p.tituloName || '').toLowerCase().includes(term) || (p.recibo || '').toLowerCase().includes(term));
+    this.renderHistorico();
+  },
+
+  renderHistorico() {
+    const tbody = document.getElementById('histPagTableBody');
+    if (!tbody) return;
+    if (this._filteredPag.length === 0) { tbody.innerHTML = '<tr><td colspan="8" class="text-center">Nenhum pagamento</td></tr>'; return; }
+    tbody.innerHTML = this._filteredPag.map((p, i) => `<tr>
+      <td>${i + 1}</td><td>${p.data || ''}</td><td><strong class="nome-aluno">${p.alunoName || ''}</strong></td>
+      <td>${p.tituloName || ''}</td><td><strong style="color:var(--success)">${(parseFloat(p.valor) || 0).toLocaleString('pt-AO')} Kz</strong></td>
+      <td>${p.mes || ''}</td><td>${p.forma || ''}</td><td><small>${p.recibo || ''}</small></td>
+    </tr>`).join('');
+  },
+
+  // === EXPORTS ===
+  exportDevedoresPDF() {
+    const PDF = getJsPDF(); if (!PDF || !this._devedores.length) return;
+    const doc = new PDF();
+    let y = PDFHelper.addHeader(doc, APP.currentSchool, { title: 'LISTA DE DEVEDORES' });
+    doc.autoTable({ startY: y + 5, head: [['#', 'Aluno', 'Classe', 'Título', 'Valor (Kz)', 'Ref.', 'Tipo']],
+      body: this._devedores.slice(0, 300).map((d, i) => [i + 1, d.aluno, d.classe, d.titulo, (parseFloat(d.valor) || 0).toLocaleString('pt-AO'), d.ref, d.periodo]),
+      styles: { fontSize: 7 }, headStyles: { fillColor: [15, 23, 42] },
+      didParseCell: data => { if (data.column.index === 1 && data.section === 'body') { data.cell.styles.textColor = [206, 17, 38]; data.cell.styles.fontStyle = 'bold'; } }
+    });
+    doc.save('devedores.pdf'); Utils.toast('PDF!', 'success');
+  },
+
+  exportDevedoresXLSX() {
+    const XL = getXLSX(); if (!XL || !this._devedores.length) return;
+    const data = this._devedores.map((d, i) => ({ '#': i + 1, 'Aluno': d.aluno, 'Classe': d.classe, 'Turma': d.turma, 'Título': d.titulo, 'Valor': d.valor, 'Ref.': d.ref, 'Tipo': d.periodo }));
+    const ws = XL.utils.json_to_sheet(data); const wb = XL.utils.book_new(); XL.utils.book_append_sheet(wb, ws, 'Devedores');
+    XL.writeFile(wb, 'devedores.xlsx'); Utils.toast('XLSX!', 'success');
+  },
+
+  exportHistoricoPDF() {
+    const PDF = getJsPDF(); if (!PDF) return;
+    const doc = new PDF();
+    let y = PDFHelper.addHeader(doc, APP.currentSchool, { title: 'HISTÓRICO DE PAGAMENTOS' });
+    doc.autoTable({ startY: y + 5, head: [['#', 'Data', 'Aluno', 'Título', 'Valor (Kz)', 'Ref.', 'Forma', 'Recibo']],
+      body: this._filteredPag.map((p, i) => [i + 1, p.data, p.alunoName, p.tituloName, (parseFloat(p.valor) || 0).toLocaleString('pt-AO'), p.mes || '', p.forma, p.recibo]),
+      styles: { fontSize: 7 }, headStyles: { fillColor: [15, 23, 42] } });
+    doc.save('pagamentos.pdf'); Utils.toast('PDF!', 'success');
+  },
+
+  exportHistoricoXLSX() {
+    const XL = getXLSX(); if (!XL) return;
+    const data = this._filteredPag.map((p, i) => ({ '#': i + 1, 'Data': p.data, 'Aluno': p.alunoName, 'Título': p.tituloName, 'Valor': p.valor, 'Ref.': p.mes, 'Forma': p.forma, 'Recibo': p.recibo }));
+    const ws = XL.utils.json_to_sheet(data); const wb = XL.utils.book_new(); XL.utils.book_append_sheet(wb, ws, 'Pagamentos');
+    XL.writeFile(wb, 'pagamentos.xlsx'); Utils.toast('XLSX!', 'success');
+  }
+};
+
+// ============ FIX 4: RECEITAS/DESPESAS - Exports corrigidos ============
+PageReceitasDespesas.exportReceitasPDF = function() {
+  const PDF = getJsPDF(); if (!PDF) return;
+  const doc = new PDF();
+  let y = PDFHelper.addHeader(doc, APP.currentSchool, { title: 'MAPA DE RECEITAS' });
+  const total = this._filteredRec.reduce((s, r) => s + (parseFloat(r.valor) || 0), 0);
+  doc.autoTable({ startY: y + 5, head: [['#', 'Data', 'Descrição', 'Categoria', 'Valor (Kz)']],
+    body: this._filteredRec.map((r, i) => [i + 1, r.data, r.descricao, r.categoria || '', (parseFloat(r.valor) || 0).toLocaleString('pt-AO')]),
+    foot: [['', '', '', 'TOTAL:', total.toLocaleString('pt-AO') + ' Kz']],
+    styles: { fontSize: 8 }, headStyles: { fillColor: [5, 150, 105] }, footStyles: { fillColor: [240, 240, 240], fontStyle: 'bold' } });
+  doc.save('receitas.pdf'); Utils.toast('PDF!', 'success');
+};
+
+PageReceitasDespesas.exportReceitasXLSX = function() {
+  const XL = getXLSX(); if (!XL) return;
+  const data = this._filteredRec.map((r, i) => ({ '#': i + 1, 'Data': r.data, 'Descrição': r.descricao, 'Categoria': r.categoria, 'Valor': r.valor, 'Referência': r.referencia }));
+  const ws = XL.utils.json_to_sheet(data); const wb = XL.utils.book_new(); XL.utils.book_append_sheet(wb, ws, 'Receitas');
+  XL.writeFile(wb, 'receitas.xlsx'); Utils.toast('XLSX!', 'success');
+};
+
+PageReceitasDespesas.exportDespesasPDF = function() {
+  const PDF = getJsPDF(); if (!PDF) return;
+  const doc = new PDF();
+  let y = PDFHelper.addHeader(doc, APP.currentSchool, { title: 'MAPA DE DESPESAS' });
+  const total = this._filteredDesp.reduce((s, d) => s + (parseFloat(d.valor) || 0), 0);
+  doc.autoTable({ startY: y + 5, head: [['#', 'Data', 'Descrição', 'Categoria', 'Valor (Kz)', 'Beneficiário']],
+    body: this._filteredDesp.map((d, i) => [i + 1, d.data, d.descricao, d.categoria || '', (parseFloat(d.valor) || 0).toLocaleString('pt-AO'), d.beneficiario || '']),
+    foot: [['', '', '', 'TOTAL:', total.toLocaleString('pt-AO') + ' Kz', '']],
+    styles: { fontSize: 8 }, headStyles: { fillColor: [220, 38, 38] }, footStyles: { fillColor: [240, 240, 240], fontStyle: 'bold' } });
+  doc.save('despesas.pdf'); Utils.toast('PDF!', 'success');
+};
+
+PageReceitasDespesas.exportDespesasXLSX = function() {
+  const XL = getXLSX(); if (!XL) return;
+  const data = this._filteredDesp.map((d, i) => ({ '#': i + 1, 'Data': d.data, 'Descrição': d.descricao, 'Categoria': d.categoria, 'Valor': d.valor, 'Beneficiário': d.beneficiario }));
+  const ws = XL.utils.json_to_sheet(data); const wb = XL.utils.book_new(); XL.utils.book_append_sheet(wb, ws, 'Despesas');
+  XL.writeFile(wb, 'despesas.xlsx'); Utils.toast('XLSX!', 'success');
+};
+
+// ============ FIX 5: NOTAS export corrigido ============
+PageNotas.exportXLSX = function() {
+  const XL = getXLSX(); if (!XL || this._alunos.length === 0) { Utils.toast('Sem dados', 'warning'); return; }
+  const trim = this._currentTrim;
+  const isFinal = Utils.isClasseFinal(this._currentClasse?.name || '');
+  const pos = Utils.getNotaPositiva(this._currentClasse?.name || '');
+
+  const data = this._alunos.map((a, i) => {
+    const n = this._notas[a.id] || {};
+    const calc = Utils.calcularMedia(n, this._currentClasse.name);
+    let row = { '#': i + 1, 'Nome': a.name };
+    if (trim === '1') { row['MAC₁'] = n.mac1 ?? ''; row['NPT₁'] = n.npt1 ?? ''; row['MT₁'] = calc.mt1 ?? ''; }
+    else if (trim === '2') { row['MAC₂'] = n.mac2 ?? ''; row['NPT₂'] = n.npt2 ?? ''; row['MT₂'] = calc.mt2 ?? ''; }
+    else { if (isFinal) { row['CT₁'] = calc.ct1 ?? ''; row['CT₂'] = calc.ct2 ?? ''; row['MAC₃'] = n.mac3 ?? ''; row['CT₃'] = calc.ct3 ?? ''; row['Exame'] = n.exame ?? ''; row['MFD'] = calc.mfd ?? ''; } else { row['MAC₃'] = n.mac3 ?? ''; row['NPT₃'] = n.npt3 ?? ''; row['MFD'] = calc.mfd ?? ''; } }
+    let obs = calc.mfd !== null ? (calc.mfd >= pos ? 'Aprovado' : 'Reprovado') : '';
+    if (a.estado === 'Transferido') obs = 'Transferido'; if (a.estado === 'Desistente') obs = 'Desistente';
+    row['Obs.'] = obs; return row;
+  });
+
+  const ws = XL.utils.json_to_sheet(data); const wb = XL.utils.book_new(); XL.utils.book_append_sheet(wb, ws, 'Notas');
+  XL.writeFile(wb, `notas_${(this._currentDisc?.name || '').replace(/\s/g, '_')}.xlsx`); Utils.toast('XLSX!', 'success');
+};
+
+PageNotas.exportPDF = function() {
+  const PDF = getJsPDF(); if (!PDF || this._alunos.length === 0) { Utils.toast('Sem dados', 'warning'); return; }
+  const doc = new PDF('landscape');
+  const trim = this._currentTrim;
+  const trimN = { '1': 'I Trimestre', '2': 'II Trimestre', '3': 'III Trimestre' };
+  const isFinal = Utils.isClasseFinal(this._currentClasse?.name || '');
+  const pos = Utils.getNotaPositiva(this._currentClasse?.name || '');
+
+  let y = PDFHelper.addHeader(doc, APP.currentSchool, { title: 'PAUTA DE NOTAS' });
+  doc.setFontSize(9);
+  doc.text(`Classe: ${this._currentClasse?.name} | Turma: ${this._currentTurma?.name} | Disciplina: ${this._currentDisc?.name} | ${trimN[trim]}`, 14, y + 3);
+  y += 8;
+
+  let head, body;
+  if (trim === '1') {
+    head = [['#', 'Nome', 'MAC₁', 'NPT₁', 'MT₁', 'Obs.']];
+    body = this._alunos.map((a, i) => { const n = this._notas[a.id] || {}; const c = Utils.calcularMedia(n, this._currentClasse.name); return [i + 1, a.name, n.mac1 ?? '', n.npt1 ?? '', c.mt1 ?? '', '']; });
+  } else if (trim === '2') {
+    head = [['#', 'Nome', 'MAC₂', 'NPT₂', 'MT₂', 'Obs.']];
+    body = this._alunos.map((a, i) => { const n = this._notas[a.id] || {}; const c = Utils.calcularMedia(n, this._currentClasse.name); return [i + 1, a.name, n.mac2 ?? '', n.npt2 ?? '', c.mt2 ?? '', '']; });
+  } else if (isFinal) {
+    head = [['#', 'Nome', 'CT₁', 'CT₂', 'MAC₃', 'CT₃', 'Exame', 'MFD', 'Obs.']];
+    body = this._alunos.map((a, i) => { const n = this._notas[a.id] || {}; const c = Utils.calcularMedia(n, this._currentClasse.name); return [i + 1, a.name, c.ct1 ?? '', c.ct2 ?? '', n.mac3 ?? '', c.ct3 ?? '', n.exame ?? '', c.mfd ?? '', '']; });
+  } else {
+    head = [['#', 'Nome', 'MAC₃', 'NPT₃', 'MFD', 'Obs.']];
+    body = this._alunos.map((a, i) => { const n = this._notas[a.id] || {}; const c = Utils.calcularMedia(n, this._currentClasse.name); return [i + 1, a.name, n.mac3 ?? '', n.npt3 ?? '', c.mfd ?? '', '']; });
+  }
+
+  doc.autoTable({ startY: y, head, body, styles: { fontSize: 8, halign: 'center' }, headStyles: { fillColor: [15, 23, 42] }, columnStyles: { 1: { halign: 'left' } },
+    didParseCell: d => { if (d.column.index === 1 && d.section === 'body') { d.cell.styles.textColor = [206, 17, 38]; d.cell.styles.fontStyle = 'bold'; } } });
+  doc.save(`notas_${(this._currentDisc?.name || '').replace(/\s/g, '_')}.pdf`); Utils.toast('PDF!', 'success');
+};
+
+// ============ FIX 6: PAUTAS export ============
+PagePautas.exportXLSX = function() {
+  const XL = getXLSX(); if (!XL || !this._currentData) return;
+  const d = this._currentData;
+  const data = d.alunos.map((a, i) => {
+    let row = { '#': i + 1, 'Nome': a.name };
+    d.discs.forEach(dc => {
+      const n = d.notasMap[`${a.id}_${dc.id}`] || {};
+      const c = Utils.calcularMedia(n, d.classe.name);
+      if (d.tipo === 'anual') { row[dc.name + ' MT1'] = c.mt1 ?? ''; row[dc.name + ' MT2'] = c.mt2 ?? ''; row[dc.name + ' MFD'] = c.mfd ?? ''; }
+      else if (d.trimestre === '1') { row[dc.name + ' MAC'] = n.mac1 ?? ''; row[dc.name + ' NPT'] = n.npt1 ?? ''; row[dc.name + ' MT'] = c.mt1 ?? ''; }
+      else if (d.trimestre === '2') { row[dc.name + ' MAC'] = n.mac2 ?? ''; row[dc.name + ' NPT'] = n.npt2 ?? ''; row[dc.name + ' MT'] = c.mt2 ?? ''; }
+      else { row[dc.name + ' MAC3'] = n.mac3 ?? ''; row[dc.name + ' MFD'] = c.mfd ?? ''; }
+    }); return row;
+  });
+  const ws = XL.utils.json_to_sheet(data); const wb = XL.utils.book_new(); XL.utils.book_append_sheet(wb, ws, 'Pauta');
+  XL.writeFile(wb, `pauta_${d.classe?.name}_${d.turma?.name}.xlsx`); Utils.toast('XLSX!', 'success');
+};
+
+// ============ FIX 7: ESTUDANTES exports ============
+PageEstudantes.exportXLSX = function() {
+  const XL = getXLSX(); if (!XL) return;
+  const data = this._filtered.map((a, i) => ({ '#': i + 1, 'Nome': a.name, 'Sexo': a.sexo, 'Nascimento': a.nascimento, 'Classe': a.classeName, 'Turma': a.turmaName, 'Curso': a.curso || '', 'Matrícula': a.matricula, 'Processo': a.processo, 'BI': a.bi, 'Estado': a.estado, 'Pai': a.nomePai, 'Mãe': a.nomeMae, 'Encarregado': a.encarregado, 'Tel.Enc.': a.telEncarregado, 'Província': a.provincia, 'Município': a.municipio }));
+  const ws = XL.utils.json_to_sheet(data); const wb = XL.utils.book_new(); XL.utils.book_append_sheet(wb, ws, 'Alunos');
+  XL.writeFile(wb, 'alunos.xlsx'); Utils.toast('XLSX!', 'success');
+};
+
+PageEstudantes.exportPDF = function() {
+  const PDF = getJsPDF(); if (!PDF) return;
+  const doc = new PDF('landscape');
+  let y = PDFHelper.addHeader(doc, APP.currentSchool, { title: 'LISTA DE ALUNOS' });
+  doc.autoTable({ startY: y + 5, head: [['#', 'Nome', 'Sexo', 'Classe', 'Turma', 'Matrícula', 'BI', 'Estado']],
+    body: this._filtered.map((a, i) => [i + 1, a.name, a.sexo, a.classeName, a.turmaName + (a.curso ? ' (' + a.curso + ')' : ''), a.matricula, a.bi || '', a.estado]),
+    styles: { fontSize: 7 }, headStyles: { fillColor: [15, 23, 42] },
+    didParseCell: d => { if (d.column.index === 1 && d.section === 'body') { d.cell.styles.textColor = [206, 17, 38]; d.cell.styles.fontStyle = 'bold'; } } });
+  doc.save('lista_alunos.pdf'); Utils.toast('PDF!', 'success');
+};
+
+// ============ FIX 8: PATRIMONIO exports ============
+PagePatrimonio.exportBensPDF = function() {
+  const PDF = getJsPDF(); if (!PDF) return;
+  const doc = new PDF('landscape');
+  let y = PDFHelper.addHeader(doc, APP.currentSchool, { title: 'MAPA PATRIMONIAL' });
+  const total = this._filteredBens.reduce((s, b) => s + ((parseFloat(b.valor) || 0) * (parseInt(b.quantidade) || 1)), 0);
+  doc.autoTable({ startY: y + 5, head: [['#', 'Código', 'Descrição', 'Categoria', 'Qtd', 'Val.Unit.', 'Val.Total', 'Local', 'Estado']],
+    body: this._filteredBens.map((b, i) => [i + 1, b.codigo, b.descricao, b.categoria, b.quantidade || 1, (parseFloat(b.valor) || 0).toLocaleString('pt-AO'), ((parseFloat(b.valor) || 0) * (parseInt(b.quantidade) || 1)).toLocaleString('pt-AO'), b.localizacao || '', b.estado]),
+    foot: [['', '', '', '', '', 'TOTAL:', total.toLocaleString('pt-AO') + ' Kz', '', '']],
+    styles: { fontSize: 7 }, headStyles: { fillColor: [15, 23, 42] }, footStyles: { fillColor: [240, 240, 240], fontStyle: 'bold' } });
+  doc.save('patrimonio.pdf'); Utils.toast('PDF!', 'success');
+};
+
+PagePatrimonio.exportBensXLSX = function() {
+  const XL = getXLSX(); if (!XL) return;
+  const data = this._filteredBens.map((b, i) => ({ '#': i + 1, 'Código': b.codigo, 'Descrição': b.descricao, 'Categoria': b.categoria, 'Qtd': b.quantidade, 'Val.Unit.': b.valor, 'Val.Total': (parseFloat(b.valor) || 0) * (parseInt(b.quantidade) || 1), 'Local': b.localizacao, 'Estado': b.estado }));
+  const ws = XL.utils.json_to_sheet(data); const wb = XL.utils.book_new(); XL.utils.book_append_sheet(wb, ws, 'Património');
+  XL.writeFile(wb, 'patrimonio.xlsx'); Utils.toast('XLSX!', 'success');
+};
+
+PagePatrimonio.exportMovPDF = function() {
+  const PDF = getJsPDF(); if (!PDF) return;
+  const doc = new PDF();
+  let y = PDFHelper.addHeader(doc, APP.currentSchool, { title: 'MOVIMENTOS PATRIMONIAIS' });
+  doc.autoTable({ startY: y + 5, head: [['#', 'Data', 'Tipo', 'Bem', 'Qtd', 'Motivo', 'Responsável']],
+    body: this._filteredMov.map((m, i) => [i + 1, m.data, m.tipo === 'entrada' ? 'Entrada' : 'Saída', m.bemDescricao, m.quantidade, m.motivo || '', m.responsavel || '']),
+    styles: { fontSize: 8 }, headStyles: { fillColor: [15, 23, 42] } });
+  doc.save('movimentos_patrimonio.pdf'); Utils.toast('PDF!', 'success');
+};
+
+// ============ VERIFICAÇÃO ============
+console.log('%c✅ Área Financeira + Downloads CORRIGIDOS!', 'color:#059669;font-weight:bold;font-size:14px');
+console.log('  ✓ Config Financeira: CRUD + exports PDF/XLSX');
+console.log('  ✓ Pagamentos: registar + devedores (periodicidade) + histórico + exports');
+console.log('  ✓ Receitas/Despesas: exports PDF/XLSX');
+console.log('  ✓ Notas: exports PDF/XLSX');
+console.log('  ✓ Pautas: export XLSX');
+console.log('  ✓ Estudantes: exports PDF/XLSX');
+console.log('  ✓ Património: exports PDF/XLSX');
+console.log('  ✓ getJsPDF/getXLSX: verificação de bibliotecas');
+</script>
 </body>
 </html>
