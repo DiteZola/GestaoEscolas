@@ -15494,5 +15494,595 @@ console.log('  ✓ Declarações: Director + Subdir.Pedagógico');
 console.log('  ✓ Certificados: Director (apenas)');
 console.log('  ✓ Passes: Director com insígnia');
 </script>
+<script type="module">
+// ============================================================
+// CORREÇÕES FINAIS: INSÍGNIA, PASSES, DECLARAÇÕES, CERTIFICADOS,
+// PAUTAS, II CICLO
+// ============================================================
+
+// ============ FIX 1: INSÍGNIA - Fundo transparente (PNG) ============
+// Forçar compressão como PNG (mantém transparência)
+const origSaveInsignia = PageConfiguracoes.saveInsignia;
+PageConfiguracoes.saveInsignia = async function() {
+  const file = document.getElementById('cfgInsigniaFile').files[0];
+  if (!file) { Utils.toast('Selecione uma imagem', 'warning'); return; }
+
+  showLoading(true);
+  try {
+    const base64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = e => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let w = img.width, h = img.height;
+          if (w > 500) { h = h * (500 / w); w = 500; }
+          canvas.width = w; canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          // Fundo TRANSPARENTE (não preencher nada)
+          ctx.clearRect(0, 0, w, h);
+          ctx.drawImage(img, 0, 0, w, h);
+          // Exportar como PNG para manter transparência
+          resolve(canvas.toDataURL('image/png'));
+        };
+        img.onerror = reject;
+        img.src = e.target.result;
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
+    await DB.saveDoc('systemConfig', 'general', { insignia: base64 });
+    APP.insigniaBase64 = base64;
+    document.getElementById('cfgInsigniaPreview').innerHTML = `<img src="${base64}" style="max-height:120px;max-width:200px">`;
+    Utils.toast('Insígnia guardada com fundo transparente!', 'success');
+  } catch (e) { Utils.toast('Erro: ' + e.message, 'error'); }
+  showLoading(false);
+};
+
+// Helper: adicionar insígnia em PDF com suporte a transparência
+window.addInsigniaPDF = function(doc, x, y, w, h) {
+  if (!APP.insigniaBase64) return false;
+  try {
+    const format = APP.insigniaBase64.includes('image/png') ? 'PNG' : 'JPEG';
+    doc.addImage(APP.insigniaBase64, format, x, y, w, h);
+    return true;
+  } catch (e) {
+    console.warn('Erro ao adicionar insígnia:', e);
+    return false;
+  }
+};
+
+// ============ FIX 2: PASSES - Design melhorado, menos espaço vazio ============
+PagePasses._exportPassesPDF = async function(pessoas, tipo) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  const pw = doc.internal.pageSize.getWidth(), ph = doc.internal.pageSize.getHeight();
+  const school = APP.currentSchool; const isAl = tipo === 'aluno';
+
+  if (!APP.insigniaBase64) { const ins = await DB.getInsignia(); if (ins) APP.insigniaBase64 = ins; }
+  const users = await DB.getCollection('users', [FB.where('schoolId', '==', school.id)]);
+  const dir = users.find(u => u.role === 'diretor');
+  const dL = dir ? (dir.sexo === 'F' ? 'A Directora' : 'O Director') : 'O Director';
+  const dN = dir ? dir.name : '';
+
+  // 6 passes por página - compactos
+  const margin = 6;
+  const gap = 4;
+  const cW = (pw - margin * 2 - gap) / 2;
+  const cH = (ph - margin * 2 - gap * 2) / 3;
+  const posArr = [];
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 2; c++)
+    posArr.push({ x: margin + c * (cW + gap), y: margin + r * (cH + gap) });
+
+  for (let i = 0; i < pessoas.length; i++) {
+    const pi = i % 6; if (i > 0 && pi === 0) doc.addPage();
+    const p = posArr[pi], pe = pessoas[i];
+    let y = p.y;
+
+    // Borda fina
+    doc.setDrawColor(206, 17, 38); doc.setLineWidth(0.5);
+    doc.roundedRect(p.x, p.y, cW, cH, 2, 2);
+
+    // Header vermelho compacto
+    doc.setFillColor(206, 17, 38);
+    doc.roundedRect(p.x, p.y, cW, 11, 2, 2, 'F');
+    doc.rect(p.x, p.y + 5, cW, 6, 'F');
+
+    // Insígnia pequena no header
+    if (APP.insigniaBase64) addInsigniaPDF(doc, p.x + 2, y + 1, 8, 8);
+
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(5); doc.setFont('helvetica', 'bold');
+    doc.text((school.name || '').substring(0, 40), p.x + 12, y + 4.5, { maxWidth: cW - 14 });
+    doc.setFontSize(3.5); doc.setFont('helvetica', 'normal');
+    doc.text(`${school.municipality || ''} - ${school.province || ''}`, p.x + 12, y + 8);
+    y += 13;
+    doc.setTextColor(0, 0, 0);
+
+    // Foto compacta
+    const phW = 16, phH = 20;
+    if (pe.photo) { try { doc.addImage(pe.photo, 'JPEG', p.x + 3, y, phW, phH); } catch (e) { doc.setDrawColor(180); doc.rect(p.x + 3, y, phW, phH); } }
+    else { doc.setDrawColor(180); doc.rect(p.x + 3, y, phW, phH); doc.setFontSize(4); doc.text('FOTO', p.x + 3 + phW / 2, y + phH / 2, { align: 'center' }); }
+
+    // Dados compactos
+    const dX = p.x + 22; let dY = y + 1;
+    doc.setFontSize(6); doc.setFont('helvetica', 'bold'); doc.setTextColor(206, 17, 38);
+    const nameL = doc.splitTextToSize(pe.name || '', cW - 25);
+    doc.text(nameL.slice(0, 2), dX, dY); dY += nameL.slice(0, 2).length * 2.8 + 1;
+
+    doc.setTextColor(0, 0, 0); doc.setFontSize(4.5); doc.setFont('helvetica', 'normal');
+
+    if (isAl) {
+      doc.text(`Classe: ${pe.classeName || ''}`, dX, dY); dY += 2.5;
+      doc.text(`Turma: ${pe.turmaName || ''} ${pe.curso ? '(' + pe.curso + ')' : ''}`, dX, dY); dY += 2.5;
+      doc.text(`Mat.: ${pe.matricula || ''}`, dX, dY); dY += 2.5;
+      doc.text(`Proc.: ${pe.processo || ''}`, dX, dY); dY += 2.5;
+    } else {
+      doc.text(`Cargo: ${getRoleName(pe.role)}`, dX, dY); dY += 2.5;
+      doc.text(`Agente: ${pe.agente || 'N/D'}`, dX, dY); dY += 2.5;
+      doc.text(`BI: ${pe.bi || ''}`, dX, dY); dY += 2.5;
+      doc.text(`Tel: ${pe.phone || pe.telefone || ''}`, dX, dY); dY += 2.5;
+    }
+
+    // Assinatura Director: Cargo → Linha fina preta → Nome
+    const aY = p.y + cH - 13;
+    doc.setFontSize(3.5); doc.setFont('helvetica', 'normal');
+    doc.text(dL, p.x + cW / 2, aY, { align: 'center' });
+    doc.setDrawColor(0, 0, 0); doc.setLineWidth(0.3);
+    doc.line(p.x + cW / 2 - 16, aY + 4, p.x + cW / 2 + 16, aY + 4);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(3.5);
+    doc.text((dN || '').substring(0, 28), p.x + cW / 2, aY + 7, { align: 'center' });
+
+    // Barra amarela
+    const bY = p.y + cH - 5;
+    doc.setFillColor(249, 214, 22); doc.rect(p.x, bY, cW, 5, 'F');
+    // Borda inferior para fechar
+    doc.setDrawColor(206, 17, 38); doc.setLineWidth(0.5);
+    doc.roundedRect(p.x, bY, cW, 5, 0, 0);
+    doc.setFontSize(4); doc.setFont('helvetica', 'bold'); doc.setTextColor(0, 0, 0);
+    doc.text(`ANO LECTIVO ${APP.currentYear?.name || ''}`, p.x + cW / 2, bY + 3.2, { align: 'center' });
+  }
+  doc.save(`passes_${tipo}s.pdf`); Utils.toast('Passes PDF gerados!', 'success');
+};
+
+// ============ FIX 3: DECLARAÇÕES - Nome do Director no corpo ============
+PageDeclaracoes._renderDeclaracaoPage = async function(doc, aluno) {
+  const pw = doc.internal.pageSize.getWidth();
+  const school = APP.currentSchool;
+  if (!APP.insigniaBase64) { const ins = await DB.getInsignia(); if (ins) APP.insigniaBase64 = ins; }
+
+  const users = await DB.getCollection('users', [FB.where('schoolId', '==', school.id)]);
+  const dir = users.find(u => u.role === 'diretor');
+  const ped = users.find(u => u.role === 'subdiretor_pedagogico');
+
+  let notas = await DB.getCollection('notas', [FB.where('alunoId', '==', aluno.id)]);
+  const nh = await DB.getCollection('notasHistorico', [FB.where('alunoId', '==', aluno.id), FB.where('classeId', '==', aluno.classeId)]);
+  notas = [...notas.filter(n => n.classeId === aluno.classeId), ...nh];
+  const discs = await DB.getCollection('disciplinas', [FB.where('schoolId', '==', school.id), FB.where('classeId', '==', aluno.classeId)]);
+  discs.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
+
+  let y = 12;
+  if (APP.insigniaBase64) { const added = addInsigniaPDF(doc, pw / 2 - 12, y, 24, 24); y += added ? 27 : 5; }
+  doc.setFontSize(11); doc.setFont('helvetica', 'bold');
+  doc.text('REPÚBLICA DE ANGOLA', pw / 2, y, { align: 'center' }); y += 5;
+  doc.setFontSize(9); doc.setFont('helvetica', 'normal');
+  doc.text('MINISTÉRIO DA EDUCAÇÃO', pw / 2, y, { align: 'center' }); y += 10;
+  doc.setFontSize(14); doc.setFont('helvetica', 'bold');
+  doc.text('DECLARAÇÃO', pw / 2, y, { align: 'center' }); y += 12;
+
+  // CORPO: Nome do DIRECTOR (não do subdirector)
+  const dirNome = dir ? dir.name : '____________________';
+  const dirCargo = dir ? (dir.sexo === 'F' ? 'Directora' : 'Director') : 'Director';
+  const nascD = aluno.nascimento ? aluno.nascimento.split('-').reverse().join('/') : '.../.../....';
+
+  doc.setFontSize(10); doc.setFont('helvetica', 'normal');
+  const corpo = `${dirNome}, ${dirCargo} ${school.denominacao || school.name || '________'}, declara para os devidos efeitos que ${aluno.name}, ${Utils.genero(aluno.sexo, 'filho')} de ${aluno.nomePai || '________'} e de ${aluno.nomeMae || '________'}, ${Utils.genero(aluno.sexo, 'nascido')} aos ${nascD}, ${Utils.genero(aluno.sexo, 'natural')} de ${aluno.naturalidade || '________'}, município de ${aluno.municipio || '________'}, província ${aluno.provincia || '________'}, ${Utils.genero(aluno.sexo, 'portador')} do B.I. n° ${aluno.bi || '________'}, passado pelo Arquivo de Identificação de ${aluno.biLocal || '________'}, frequentou neste estabelecimento de ensino no ano lectivo ${aluno.yearName || '20.../20...'}, a ${aluno.classeName || '________'}, com as seguintes classificações:`;
+
+  const lines = doc.splitTextToSize(corpo, pw - 30);
+  doc.text(lines, 15, y, { align: 'justify', maxWidth: pw - 30 }); y += lines.length * 5 + 6;
+
+  // Tabela de notas
+  if (notas.length > 0) {
+    const nm = {}; notas.forEach(n => { nm[n.disciplinaId] = n; });
+    const td = discs.map(d => {
+      const n = nm[d.id]; const c = n ? Utils.calcularMedia(n, aluno.classeName) : { mfd: null };
+      const mfd = c.mfd !== null ? c.mfd : (n?.mfd != null ? parseFloat(n.mfd) : null);
+      return [d.name, mfd !== null ? mfd : '-', mfd !== null ? Utils.valorExtenso(mfd) : '-'];
+    }).filter(r => r[1] !== '-');
+    if (td.length > 0) {
+      doc.autoTable({ startY: y, head: [['Disciplina', 'Nota', 'Por Extenso']], body: td,
+        styles: { fontSize: 9, halign: 'center' }, headStyles: { fillColor: [15, 23, 42] },
+        columnStyles: { 0: { halign: 'left' } }, margin: { left: 15, right: 15 } });
+      y = doc.lastAutoTable.finalY + 8;
+    }
+  }
+
+  doc.setFontSize(9);
+  const fecho = 'Para efeitos legais lhe é passada a presente DECLARAÇÃO, assinada e autenticada com carimbo a óleo/selo branco em uso neste estabelecimento de Ensino.';
+  const fl = doc.splitTextToSize(fecho, pw - 30); doc.text(fl, 15, y, { maxWidth: pw - 30 }); y += fl.length * 4.5 + 5;
+  doc.text(`${school.province || school.municipality || '________'}, ${Utils.getCurrentDate()}`, pw / 2, y, { align: 'center' }); y += 15;
+
+  // Assinaturas: Director + Subdirector Pedagógico
+  const pedNome = ped ? ped.name : '____________________';
+  const dLabel = dir ? (dir.sexo === 'F' ? 'A Directora' : 'O Director') : 'O Director';
+  const pLabel = ped ? (ped.sexo === 'F' ? 'A Subdirectora Pedagógica' : 'O Subdirector Pedagógico') : 'O Subdirector Pedagógico';
+
+  renderAssinatura(doc, 20, y, 65, dLabel, dirNome);
+  renderAssinatura(doc, pw - 85, y, 65, pLabel, pedNome);
+};
+
+// ============ FIX 4: CERTIFICADOS - Selecção de classe e turma corrigida ============
+PageCertificados.render = async function(container) {
+  const schoolId = APP.currentSchool ? APP.currentSchool.id : null;
+  if (!schoolId) {
+    container.innerHTML = '<div class="empty-state"><i class="fas fa-school"></i><p>Selecione uma escola primeiro</p></div>';
+    return;
+  }
+
+  container.innerHTML = `
+    <h2 class="page-title"><i class="fas fa-certificate"></i> Certificados</h2>
+    <div class="card mb-3 no-print">
+      <div class="card-body">
+        <p style="color:var(--text-light);margin-bottom:12px"><i class="fas fa-info-circle"></i> Certificados para classes finais: 6ª, 9ª, 12ª e 13ª Classe</p>
+        <div class="filter-grid" style="padding:0;box-shadow:none">
+          <div class="form-group"><label>Ano Letivo</label>
+            <select id="certAno"><option value="">Selecione</option></select></div>
+          <div class="form-group"><label>Classe (Final)</label>
+            <select id="certClasse" onchange="PageCertificados.onClasseChange()"><option value="">Selecione</option></select></div>
+          <div class="form-group"><label>Turma</label>
+            <select id="certTurma"><option value="">Todas</option></select></div>
+          <div class="form-group" style="padding-top:20px">
+            <button class="btn btn-primary" onclick="PageCertificados.gerar()"><i class="fas fa-cogs"></i> Gerar</button>
+          </div>
+        </div>
+        <div class="form-group mt-2"><label>Ou pesquisar aluno individual</label>
+          <input type="text" id="certSearchAluno" class="search-input w-full" placeholder="Nome, BI ou matrícula..." oninput="PageCertificados.searchAluno()"></div>
+        <div id="certSearchResults" style="max-height:150px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius);display:none"></div>
+      </div>
+    </div>
+    <div id="certContent"></div>`;
+
+  await this.loadFilters();
+};
+
+PageCertificados.loadFilters = async function() {
+  const sid = APP.currentSchool.id;
+  this._classes = await DB.getCollection('classes', [FB.where('schoolId', '==', sid)]);
+  this._classes.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
+
+  // Carregar TODAS as turmas (sem filtro de ano para permitir selecção por ano)
+  this._turmas = await DB.getCollection('turmas', [FB.where('schoolId', '==', sid)]);
+  this._disciplinas = await DB.getCollection('disciplinas', [FB.where('schoolId', '==', sid)]);
+  this._disciplinas.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
+  this._allAlunos = await DB.getCollection('alunos', [FB.where('schoolId', '==', sid)]);
+
+  // Anos letivos
+  const anos = await DB.getCollection('academicYears', [FB.where('schoolId', '==', sid)]);
+  const selA = document.getElementById('certAno');
+  anos.sort((a, b) => (b.name || '').localeCompare(a.name || '')).forEach(a => {
+    selA.innerHTML += `<option value="${a.id}" ${a.id === APP.currentYearId ? 'selected' : ''}>${a.name}</option>`;
+  });
+
+  // Classes finais
+  const selC = document.getElementById('certClasse');
+  this._classes.filter(c => Utils.isClasseFinal(c.name)).forEach(c => {
+    selC.innerHTML += `<option value="${c.id}">${c.name}</option>`;
+  });
+};
+
+PageCertificados.onClasseChange = function() {
+  const cid = document.getElementById('certClasse').value;
+  const sel = document.getElementById('certTurma');
+  sel.innerHTML = '<option value="">Todas</option>';
+  // Filtrar turmas pela classe seleccionada
+  const yearId = document.getElementById('certAno').value || APP.currentYearId;
+  this._turmas.filter(t => t.classeId === cid && (!yearId || t.yearId === yearId || !t.yearId)).forEach(t => {
+    sel.innerHTML += `<option value="${t.id}">${t.name} ${t.curso ? '(' + t.curso + ')' : ''}</option>`;
+  });
+};
+
+// ============ FIX 5: PAUTAS - Trimestral e Anual corrigidas ============
+PagePautas.gerarPauta = async function() {
+  const isProfessor = APP.currentUser.role === 'professor';
+  if (isProfessor) { await this._gerarMiniPauta(); return; }
+
+  const classeId = document.getElementById('pautaClasse').value;
+  const turmaId = document.getElementById('pautaTurma').value;
+  const tipo = document.getElementById('pautaTipo').value;
+  const trimestre = document.getElementById('pautaTrimestre').value;
+
+  if (!classeId || !turmaId) { Utils.toast('Selecione classe e turma', 'warning'); return; }
+
+  const classe = this._classes.find(c => c.id === classeId);
+  const turma = this._turmas.find(t => t.id === turmaId);
+  const isFinal = Utils.isClasseFinal(classe ? classe.name : '');
+  const notaPos = Utils.getNotaPositiva(classe ? classe.name : '');
+  const trimNomes = { '1': 'I Trimestre', '2': 'II Trimestre', '3': 'III Trimestre' };
+
+  showLoading(true);
+  try {
+    let aQ = [FB.where('schoolId', '==', APP.currentSchool.id), FB.where('turmaId', '==', turmaId)];
+    if (APP.currentYearId) aQ.push(FB.where('yearId', '==', APP.currentYearId));
+    let alunos = await DB.getCollection('alunos', aQ);
+    alunos.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+    let discs = this._disciplinas.filter(d => d.classeId === classeId);
+    if (turma && turma.curso) discs = discs.filter(d => !d.curso || d.curso === turma.curso || d.curso === '');
+
+    let nQ = [FB.where('schoolId', '==', APP.currentSchool.id), FB.where('turmaId', '==', turmaId)];
+    if (APP.currentYearId) nQ.push(FB.where('yearId', '==', APP.currentYearId));
+    const todasNotas = await DB.getCollection('notas', nQ);
+    const notasMap = {};
+    todasNotas.forEach(n => { notasMap[`${n.alunoId}_${n.disciplinaId}`] = n; });
+
+    // Direcção
+    const users = await DB.getCollection('users', [FB.where('schoolId', '==', APP.currentSchool.id)]);
+    const dir = users.find(u => u.role === 'diretor');
+    const ped = users.find(u => u.role === 'subdiretor_pedagogico');
+    const sec = users.find(u => u.role === 'secretario');
+
+    let html = `<div class="card">
+      <div class="card-header">
+        <h4><i class="fas fa-file-alt"></i> Pauta ${tipo === 'anual' ? 'Anual' : trimNomes[trimestre]} - ${classe?.name || ''} - Turma ${turma?.name || ''} ${turma?.curso ? '(' + turma.curso + ')' : ''}</h4>
+        <div style="display:flex;gap:6px" class="no-print">
+          <button class="btn btn-sm btn-primary" onclick="PagePautas.exportPDF()"><i class="fas fa-file-pdf"></i> PDF</button>
+          <button class="btn btn-sm btn-success" onclick="PagePautas.exportXLSX()"><i class="fas fa-file-excel"></i> XLSX</button>
+        </div>
+      </div>
+      <div class="card-body scroll-x">`;
+
+    if (tipo === 'anual') {
+      // ===== PAUTA ANUAL: Médias trimestrais + MFD + Observação =====
+      html += '<table class="table-sm"><thead><tr><th>#</th><th>Nome do Aluno</th>';
+      discs.forEach(d => {
+        html += `<th class="text-center" colspan="4" style="font-size:9px;border-bottom:none">${d.name.substring(0, 10)}</th>`;
+      });
+      html += '<th class="text-center">Obs.</th></tr><tr><th></th><th></th>';
+      discs.forEach(() => {
+        html += '<th class="text-center" style="font-size:8px">MT₁</th><th class="text-center" style="font-size:8px">MT₂</th><th class="text-center" style="font-size:8px">MT₃</th><th class="text-center" style="font-size:8px">MFD</th>';
+      });
+      html += '<th></th></tr></thead><tbody>';
+
+      alunos.forEach((a, i) => {
+        let allNotasAluno = [];
+        html += `<tr><td>${i + 1}</td><td><strong class="nome-aluno">${a.name}</strong></td>`;
+
+        discs.forEach(d => {
+          const n = notasMap[`${a.id}_${d.id}`] || {};
+          const calc = Utils.calcularMedia(n, classe.name);
+          const mt1 = calc.mt1, mt2 = calc.mt2;
+          let mt3 = null;
+          if (n.mac3 != null && n.npt3 != null) mt3 = Math.round(((parseFloat(n.mac3) + parseFloat(n.npt3)) / 2) * 10) / 10;
+          if (isFinal && calc.ct3 !== null) mt3 = calc.ct3;
+          const mfd = calc.mfd;
+
+          const nc = (v) => v !== null ? (v >= notaPos ? 'nota-positiva' : 'nota-negativa') : '';
+          html += `<td class="text-center ${nc(mt1)}" style="font-size:10px">${mt1 !== null ? mt1 : '-'}</td>`;
+          html += `<td class="text-center ${nc(mt2)}" style="font-size:10px">${mt2 !== null ? mt2 : '-'}</td>`;
+          html += `<td class="text-center ${nc(mt3)}" style="font-size:10px">${mt3 !== null ? mt3 : '-'}</td>`;
+          html += `<td class="text-center ${nc(mfd)}" style="font-size:10px"><strong>${mfd !== null ? mfd : '-'}</strong></td>`;
+
+          if (mfd !== null) allNotasAluno.push({ mfd, disciplina: d.name });
+        });
+
+        // Observação
+        let obs = '';
+        if (a.estado === 'Transferido') obs = Utils.genero(a.sexo, 'transferido');
+        else if (a.estado === 'Desistente') obs = 'Desistente';
+        else if (allNotasAluno.length > 0 && allNotasAluno.length === discs.length) {
+          obs = Utils.genero(a.sexo, Utils.checkAprovacao(a, classe.name, allNotasAluno));
+        }
+        const obsCls = obs.toLowerCase().includes('aprov') ? 'nota-positiva' : obs.toLowerCase().includes('reprov') ? 'nota-negativa' : '';
+        html += `<td class="text-center ${obsCls}"><small><strong>${obs ? obs.charAt(0).toUpperCase() + obs.slice(1) : ''}</strong></small></td></tr>`;
+      });
+      html += '</tbody></table>';
+
+    } else {
+      // ===== PAUTA TRIMESTRAL: MAC + NPT + MT por disciplina + Observação =====
+      html += '<table class="table-sm"><thead><tr><th>#</th><th>Nome do Aluno</th>';
+      discs.forEach(d => {
+        html += `<th class="text-center" colspan="3" style="font-size:9px;border-bottom:none">${d.name.substring(0, 12)}</th>`;
+      });
+      html += '<th class="text-center">Obs.</th></tr><tr><th></th><th></th>';
+      discs.forEach(() => {
+        html += '<th class="text-center" style="font-size:8px">MAC</th><th class="text-center" style="font-size:8px">NPT</th><th class="text-center" style="font-size:8px">MT</th>';
+      });
+      html += '<th></th></tr></thead><tbody>';
+
+      alunos.forEach((a, i) => {
+        html += `<tr><td>${i + 1}</td><td><strong class="nome-aluno">${a.name}</strong></td>`;
+
+        discs.forEach(d => {
+          const n = notasMap[`${a.id}_${d.id}`] || {};
+          const calc = Utils.calcularMedia(n, classe.name);
+          let mac = '', npt = '', mt = null;
+
+          if (trimestre === '1') { mac = n.mac1 ?? ''; npt = n.npt1 ?? ''; mt = calc.mt1; }
+          else if (trimestre === '2') { mac = n.mac2 ?? ''; npt = n.npt2 ?? ''; mt = calc.mt2; }
+          else {
+            mac = n.mac3 ?? '';
+            npt = isFinal ? (n.exame ?? '') : (n.npt3 ?? '');
+            mt = isFinal ? calc.mfd : (n.mac3 != null && n.npt3 != null ? Math.round(((parseFloat(n.mac3) + parseFloat(n.npt3)) / 2) * 10) / 10 : null);
+          }
+
+          const nc = (v) => v !== null ? (v >= notaPos ? 'nota-positiva' : 'nota-negativa') : '';
+          html += `<td class="text-center" style="font-size:10px">${mac !== '' ? mac : '-'}</td>`;
+          html += `<td class="text-center" style="font-size:10px">${npt !== '' ? npt : '-'}</td>`;
+          html += `<td class="text-center ${nc(mt)}" style="font-size:10px"><strong>${mt !== null ? mt : '-'}</strong></td>`;
+        });
+
+        let obs = '';
+        if (a.estado === 'Transferido') obs = Utils.genero(a.sexo, 'transferido');
+        else if (a.estado === 'Desistente') obs = 'Desistente';
+        const obsCls = obs.toLowerCase().includes('ransf') || obs.toLowerCase().includes('esist') ? 'text-red' : '';
+        html += `<td class="text-center ${obsCls}"><small>${obs ? obs.charAt(0).toUpperCase() + obs.slice(1) : ''}</small></td></tr>`;
+      });
+      html += '</tbody></table>';
+    }
+
+    // Assinaturas
+    const dLabel = dir ? (dir.sexo === 'F' ? 'A Directora' : 'O Director') : 'O Director';
+    const pLabel = ped ? (ped.sexo === 'F' ? 'A Subdirectora Pedagógica' : 'O Subdirector Pedagógico') : 'O Subdirector Pedagógico';
+    const sLabel = sec ? (sec.sexo === 'F' ? 'A Secretária' : 'O Secretário') : 'O Secretário';
+
+    html += `<div style="margin-top:40px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:20px">
+      <div style="text-align:center;flex:1;min-width:150px">
+        <p style="font-size:10px">${dLabel}</p>
+        <div style="border-top:1px solid #000;width:160px;margin:16px auto 4px"></div>
+        <p style="font-size:10px;font-weight:600">${dir?.name || ''}</p>
+      </div>
+      <div style="text-align:center;flex:1;min-width:150px">
+        <p style="font-size:10px">${pLabel}</p>
+        <div style="border-top:1px solid #000;width:160px;margin:16px auto 4px"></div>
+        <p style="font-size:10px;font-weight:600">${ped?.name || ''}</p>
+      </div>
+      <div style="text-align:center;flex:1;min-width:150px">
+        <p style="font-size:10px">${sLabel}</p>
+        <div style="border-top:1px solid #000;width:160px;margin:16px auto 4px"></div>
+        <p style="font-size:10px;font-weight:600">${sec?.name || ''}</p>
+      </div>
+    </div>`;
+
+    html += '</div></div>';
+    this._currentData = { alunos, discs, notasMap, classe, turma, tipo, trimestre, notaPos, isFinal, dir, ped, sec };
+    document.getElementById('pautaContent').innerHTML = html;
+
+  } catch (e) { console.error(e); Utils.toast('Erro: ' + e.message, 'error'); }
+  showLoading(false);
+};
+
+// ============ FIX 6: PAUTAS PDF ============
+PagePautas.exportPDF = function() {
+  if (!this._currentData) return;
+  const d = this._currentData;
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF('landscape');
+  const trimN = { '1': 'I Trimestre', '2': 'II Trimestre', '3': 'III Trimestre' };
+
+  let y = PDFHelper.addHeader(doc, APP.currentSchool, { title: `PAUTA ${d.tipo === 'anual' ? 'ANUAL' : trimN[d.trimestre]}` });
+  doc.setFontSize(9);
+  doc.text(`Classe: ${d.classe?.name} | Turma: ${d.turma?.name} ${d.turma?.curso ? '(' + d.turma.curso + ')' : ''} | Ano: ${APP.currentYear?.name || ''}`, 14, y + 3);
+  y += 7;
+
+  let head, body;
+
+  if (d.tipo === 'anual') {
+    head = [['#', 'Nome', ...d.discs.flatMap(dc => [dc.name.substring(0, 6) + ' MT1', 'MT2', 'MT3', 'MFD']), 'Obs.']];
+    body = d.alunos.map((a, i) => {
+      let row = [i + 1, a.name];
+      let allN = [];
+      d.discs.forEach(dc => {
+        const n = d.notasMap[`${a.id}_${dc.id}`] || {};
+        const c = Utils.calcularMedia(n, d.classe.name);
+        let mt3 = null;
+        if (n.mac3 != null && n.npt3 != null) mt3 = Math.round(((parseFloat(n.mac3) + parseFloat(n.npt3)) / 2) * 10) / 10;
+        if (d.isFinal && c.ct3 !== null) mt3 = c.ct3;
+        row.push(c.mt1 ?? '-', c.mt2 ?? '-', mt3 ?? '-', c.mfd ?? '-');
+        if (c.mfd !== null) allN.push({ mfd: c.mfd, disciplina: dc.name });
+      });
+      let obs = a.estado === 'Transferido' ? 'Transf.' : a.estado === 'Desistente' ? 'Desist.' : '';
+      if (!obs && allN.length === d.discs.length) obs = Utils.genero(a.sexo, Utils.checkAprovacao(a, d.classe.name, allN)).substring(0, 8);
+      row.push(obs); return row;
+    });
+  } else {
+    head = [['#', 'Nome', ...d.discs.flatMap(dc => [dc.name.substring(0, 7) + ' MAC', 'NPT', 'MT']), 'Obs.']];
+    body = d.alunos.map((a, i) => {
+      let row = [i + 1, a.name];
+      d.discs.forEach(dc => {
+        const n = d.notasMap[`${a.id}_${dc.id}`] || {};
+        const c = Utils.calcularMedia(n, d.classe.name);
+        if (d.trimestre === '1') row.push(n.mac1 ?? '-', n.npt1 ?? '-', c.mt1 ?? '-');
+        else if (d.trimestre === '2') row.push(n.mac2 ?? '-', n.npt2 ?? '-', c.mt2 ?? '-');
+        else row.push(n.mac3 ?? '-', d.isFinal ? (n.exame ?? '-') : (n.npt3 ?? '-'), c.mfd ?? '-');
+      });
+      let obs = a.estado === 'Transferido' ? 'Transf.' : a.estado === 'Desistente' ? 'Desist.' : '';
+      row.push(obs); return row;
+    });
+  }
+
+  doc.autoTable({
+    startY: y, head, body,
+    styles: { fontSize: 5, halign: 'center', cellPadding: 1.2 },
+    headStyles: { fillColor: [15, 23, 42], fontSize: 4.5 },
+    columnStyles: { 1: { halign: 'left' } },
+    didParseCell: (data) => {
+      if (data.column.index === 1 && data.section === 'body') { data.cell.styles.textColor = [206, 17, 38]; data.cell.styles.fontStyle = 'bold'; }
+    }
+  });
+
+  // Assinaturas
+  const fY = doc.lastAutoTable.finalY + 12;
+  const pw2 = doc.internal.pageSize.getWidth();
+  const dL = d.dir ? (d.dir.sexo === 'F' ? 'A Directora' : 'O Director') : 'O Director';
+  const pL = d.ped ? (d.ped.sexo === 'F' ? 'A Subdir. Ped.' : 'O Subdir. Ped.') : 'O Subdir. Ped.';
+  const sL = d.sec ? (d.sec.sexo === 'F' ? 'A Secretária' : 'O Secretário') : 'O Secretário';
+
+  const sp = pw2 / 4;
+  [{ l: dL, n: d.dir?.name, x: sp }, { l: pL, n: d.ped?.name, x: sp * 2 }, { l: sL, n: d.sec?.name, x: sp * 3 }].forEach(a => {
+    doc.setFontSize(7); doc.text(a.l, a.x, fY, { align: 'center' });
+    doc.line(a.x - 25, fY + 8, a.x + 25, fY + 8);
+    doc.setFont('helvetica', 'bold');
+    doc.text((a.n || '').substring(0, 22), a.x, fY + 12, { align: 'center' });
+    doc.setFont('helvetica', 'normal');
+  });
+
+  doc.save(`pauta_${d.tipo}_${d.classe?.name}_${d.turma?.name}.pdf`);
+  Utils.toast('Pauta PDF gerada!', 'success');
+};
+
+// ============ FIX 7: CERTIFICADOS - Insígnia com PNG transparente ============
+const _origCertRenderFinal = PageCertificados._renderCertificadoPage;
+PageCertificados._renderCertificadoPage = async function(doc, aluno) {
+  if (!APP.insigniaBase64) { const ins = await DB.getInsignia(); if (ins) APP.insigniaBase64 = ins; }
+  // A função original já usa addImage com a insígnia
+  // Substituir a chamada addImage pela versão com suporte PNG
+  const origAddImage = doc.addImage.bind(doc);
+  doc.addImage = function(data, format, ...args) {
+    if (data === APP.insigniaBase64 && data && data.includes('image/png')) {
+      return origAddImage(data, 'PNG', ...args);
+    }
+    return origAddImage(data, format, ...args);
+  };
+  await _origCertRenderFinal.call(this, doc, aluno);
+  doc.addImage = origAddImage; // restaurar
+};
+
+// ============ FIX 8: PDFHelper.addHeader - Insígnia PNG ============
+const origAddHeader = PDFHelper.addHeader;
+PDFHelper.addHeader = function(doc, school, options = {}) {
+  const pw = doc.internal.pageSize.getWidth();
+  let y = 10;
+  if (APP.insigniaBase64) {
+    const added = addInsigniaPDF(doc, pw / 2 - 12, y, 24, 24);
+    y += added ? 27 : 5;
+  }
+  doc.setFontSize(11); doc.setFont('helvetica', 'bold');
+  doc.text('REPÚBLICA DE ANGOLA', pw / 2, y, { align: 'center' }); y += 5;
+  doc.setFontSize(9); doc.setFont('helvetica', 'normal');
+  doc.text('MINISTÉRIO DA EDUCAÇÃO', pw / 2, y, { align: 'center' }); y += 8;
+  if (options.title) {
+    doc.setFontSize(14); doc.setFont('helvetica', 'bold');
+    doc.text(options.title, pw / 2, y, { align: 'center' }); y += 8;
+  }
+  if (!options.noSchoolInfo && school) {
+    doc.setFontSize(8); doc.setFont('helvetica', 'normal');
+    doc.text(school.name || '', pw / 2, y, { align: 'center' }); y += 4;
+    if (school.address || school.municipality) doc.text(`${school.municipality || ''} - ${school.province || ''}`, pw / 2, y, { align: 'center' }); y += 4;
+  }
+  return y;
+};
+
+// ============ VERIFICAÇÃO ============
+console.log('%c✅ Correções finais aplicadas!', 'color:#059669;font-weight:bold;font-size:14px');
+console.log('  ✓ Insígnia: fundo transparente (PNG)');
+console.log('  ✓ Passes: compactos, assinatura Director (linha fina preta)');
+console.log('  ✓ Declarações: nome Director no corpo, Subdir.Ped. só na assinatura');
+console.log('  ✓ Certificados: selecção classe/turma corrigida');
+console.log('  ✓ Pauta Trimestral: MAC + NPT + MT por disciplina + Obs.');
+console.log('  ✓ Pauta Anual: MT1 + MT2 + MT3 + MFD + Obs.');
+console.log('  ✓ Boletins: Subdir.Ped + Coordenador + Encarregado');
+console.log('  ✓ Assinaturas: Cargo → Linha → Nome (todos docs)');
+</script>
 </body>
 </html>
